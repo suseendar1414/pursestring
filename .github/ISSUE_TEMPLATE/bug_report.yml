@@ -1,0 +1,31 @@
+name: Bug report
+description: Something isn't working as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The intent you submitted and the relevant part of policies.yaml help a lot. Remove any card numbers or secrets.
+  - type: input
+    id: version
+    attributes:
+      label: PurseString version
+      placeholder: "0.1.0 (pursestring --version)"
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How are you running it?
+      options: [npx / stdio, Docker / HTTP, From source]
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: Claude Desktop, Cursor, LangGraph, ...

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-label="PurseString: the open-source policy layer between your AI agents and your money">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#121a33"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="360" rx="24" fill="url(#bg)"/>
+  <g transform="translate(80,96)">
+    <path d="M60 0 L120 22 V78 C120 122 94 152 60 168 C26 152 0 122 0 78 V22 Z" fill="none" stroke="url(#acc)" stroke-width="8" stroke-linejoin="round"/>
+    <rect x="30" y="62" width="60" height="40" rx="6" fill="none" stroke="#e5e7eb" stroke-width="6"/>
+    <line x1="30" y1="76" x2="90" y2="76" stroke="#e5e7eb" stroke-width="6"/>
+    <path d="M44 124 l12 12 l22 -24" fill="none" stroke="#34d399" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="250" y="160" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="84" font-weight="800" fill="#f9fafb">Purse<tspan fill="url(#acc)">String</tspan></text>
+  <text x="252" y="215" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="25" fill="#cbd5e1">The open-source policy layer between your AI agents and your money.</text>
+  <text x="252" y="262" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#94a3b8">no double charges · no surprise subscriptions · approve in Slack · audit every purchase</text>
+</svg>

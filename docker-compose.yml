@@ -1,0 +1,21 @@
+# docker compose up -d
+# MCP endpoint: http://localhost:8787/mcp   Health: http://localhost:8787/healthz
+services:
+  pursestring:
+    build: .
+    image: pursestring:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      PURSESTRING_TOKEN: ${PURSESTRING_TOKEN:-}               # bearer token agents must send to /mcp
+      PURSESTRING_ADMIN_TOKEN: ${PURSESTRING_ADMIN_TOKEN:-}   # bearer token for the approve/deny API
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      LITHIC_API_KEY: ${LITHIC_API_KEY:-}               # set to use Lithic sandbox cards instead of the mock rail
+    volumes:
+      - ./policies.yaml:/config/policies.yaml:ro
+      - pursestring-data:/data                              # state.json + decisions.jsonl (the audit log)
+
+volumes:
+  pursestring-data:

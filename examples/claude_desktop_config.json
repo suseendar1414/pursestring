@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pursestring": {
+      "command": "npx",
+      "args": ["-y", "github:suseendar1414/pursestring"],
+      "env": {
+        "PURSESTRING_POLICY": "/absolute/path/to/policies.yaml",
+        "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/..."
+      }
+    }
+  }
+}

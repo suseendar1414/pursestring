@@ -1,0 +1,51 @@
+# PurseString policy. Every purchase an agent makes is checked against these rules.
+# Decision order: any "deny" rule fails -> denied. Any other rule fails -> paused for a human.
+# Everything passes -> auto-approved and a single-use card is issued.
+version: 1
+currency: USD
+
+vendors:
+  # Where agents may buy without asking. "*.example.com" also matches subdomains.
+  allowlist:
+    - openai.com
+    - anthropic.com
+    - "*.github.com"
+    - pdfocr.io
+  # Never, even with approval.
+  blocklist:
+    - "*.casino"
+    - giftcards.com
+
+auto_approve:
+  max_amount: 20                  # strictly under this, one-time, allowlisted -> no human needed
+  require_allowlisted_vendor: true
+  allow_recurring: false
+
+require_approval:
+  over_amount: 50                 # anything above always goes to a human
+  recurring: true                 # subscriptions and auto-renewing trials always go to a human
+  non_allowlisted_vendor: true
+
+hard_limits:
+  max_amount: 1000                # refused outright, nobody can approve it
+  per_agent_daily_budget: 200     # past this, every spend needs a human
+
+intent:
+  require_alternatives: true      # agent must say what free options it tried first
+  min_goal_length: 15
+
+idempotency:
+  window_minutes: 30              # same agent + task + vendor + amount inside this window = same purchase
+
+approvals:
+  ttl_minutes: 1440               # pending or approved intents expire after a day
+
+notifications:
+  # Or set SLACK_WEBHOOK_URL / DISCORD_WEBHOOK_URL in the environment.
+  # slack_webhook_url: https://hooks.slack.com/services/...
+  # discord_webhook_url: https://discord.com/api/webhooks/...
+
+adapter:
+  type: mock                      # mock | lithic  (LITHIC_API_KEY in the env switches to lithic automatically)
+  lithic:
+    environment: sandbox
