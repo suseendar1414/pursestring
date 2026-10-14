@@ -21,6 +21,7 @@ interface LithicCard {
  */
 export class LithicAdapter implements CardAdapter {
   readonly name = "lithic";
+  readonly kind = "card" as const;
   private readonly baseUrl: string;
 
   constructor(
@@ -72,6 +73,10 @@ export class LithicAdapter implements CardAdapter {
 
   async getCard(ref: CardReference): Promise<CardDetails> {
     const card = await this.call<LithicCard>("GET", `/cards/${encodeURIComponent(ref.token)}`);
-    return { ...this.toDetails(card, ref), issued_at: ref.issued_at };
+    return { ...this.toDetails(card, ref), issued_at: ref.issued_at, expires_at: ref.expires_at };
+  }
+
+  async closeCard(ref: CardReference): Promise<void> {
+    await this.call("PATCH", `/cards/${encodeURIComponent(ref.token)}`, { state: "CLOSED" });
   }
 }

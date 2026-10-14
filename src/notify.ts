@@ -12,6 +12,7 @@ function summaryLines(rec: IntentRecord): string[] {
     `*Agent:* ${i.agent_id}   *Task:* ${i.task_id}`,
     `*Goal:* ${i.task_goal}`,
     `*Spend:* ${i.amount.toFixed(2)} ${i.currency} at ${i.vendor_domain}${i.is_recurring ? "  (RECURRING)" : ""}`,
+    `*Rail:* ${rec.rail}`,
     `*Alternatives tried:* ${i.alternatives_attempted.length ? i.alternatives_attempted.join("; ") : "none"}`,
     `*Why it needs you:* ${failed.map((r) => `${r.rule}: ${r.detail}`).join(" | ")}`,
     "",

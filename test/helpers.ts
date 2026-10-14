@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Rails } from "../src/adapters/index.js";
 import { MockAdapter } from "../src/adapters/mock.js";
 import { parsePolicy, type Config } from "../src/config.js";
 import { Governance } from "../src/governance.js";
@@ -37,12 +38,14 @@ export function setup(policy: unknown = POLICY) {
   let issued = 0;
   const countingAdapter = {
     name: adapter.name,
+    kind: adapter.kind,
+    closeCard: adapter.closeCard.bind(adapter),
     issueCard: async (req: Parameters<MockAdapter["issueCard"]>[0]) => {
       issued++;
       return adapter.issueCard(req);
     },
     getCard: adapter.getCard.bind(adapter),
   };
-  const gov = new Governance(config, store, countingAdapter, notifier);
-  return { gov, store, pinged, dir, issuedCount: () => issued };
+  const gov = new Governance(config, store, new Rails(config, { mock: countingAdapter }), notifier);
+  return { gov, store, pinged, dir, adapter, issuedCount: () => issued };
 }

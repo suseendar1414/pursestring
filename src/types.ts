@@ -52,7 +52,19 @@ export interface IntentRecord {
   approved_by?: string;
   denied_by?: string;
   decision_note?: string;
+  /** The rail chosen by policy routing at submit time. */
+  rail: string;
   card?: CardReference;
+  /** Real-time authorization decisions made against this intent's card. */
+  authorizations?: AuthorizationRecord[];
+}
+
+export interface AuthorizationRecord {
+  ts: string;
+  amount: number;
+  merchant: string;
+  approved: boolean;
+  reason: string;
 }
 
 /** What we persist about an issued card. Never the PAN or CVV. */
@@ -64,6 +76,9 @@ export interface CardReference {
   spend_limit: number;
   currency: string;
   single_use: boolean;
+  /** Single-use cards stop working after this time. */
+  expires_at?: string;
+  closed_at?: string;
 }
 
 export interface CardDetails extends CardReference {

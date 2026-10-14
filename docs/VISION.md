@@ -35,6 +35,55 @@ PurseString acts as the central control plane between any AI agent framework (Cl
 └───────────────┴───────────────────┴─────────────────────────┘
 ```
 
+### Rails: BaaS first, banks later
+
+PurseString doesn't wait for traditional banks like Amex, Chase or Bank of America to ship consumer-facing virtual card APIs. It connects to **Banking-as-a-Service (BaaS) platforms and issuer processors** (Lithic, Marqeta, Highnote, Galileo). They partner with regulated sponsor banks (e.g. Lead Bank, Evolve, Cross River) and give direct API access to mint real Visa and Mastercard credentials on the fly.
+
+```
+[ AI Agent ]
+    │
+    ▼
+[ PurseString MCP Server ] ──(1. validates intent + policy)
+    │
+    ▼
+[ BaaS / Issuer Processor API ] ──(e.g. Lithic, Marqeta, Highnote)
+    │
+    ▼
+[ Sponsor Bank + Visa/Mastercard Network ] ──(2. mints a real virtual card)
+    │
+    ▼
+[ Virtual Card Credentials Returned ] ──(3. capped to $15, closes in 10 minutes)
+```
+
+**What BaaS APIs give us**
+
+- **Just-in-time (JIT) authorization.** Cards don't need to be pre-loaded. When a merchant attempts a charge, the issuer sends a real-time webhook: *"Merchant X wants $45. Approve?"* PurseString checks the charge against the agent's approved intent and answers in milliseconds (Lithic allows up to 6 seconds and recommends under 3).
+- **Network coverage.** Real Visa and Mastercard virtual cards, accepted by almost every online merchant.
+- **Commercial credit / charge cards.** Lithic and Highnote can issue commercial charge cards (B2B credit), not just debit.
+
+**When an enterprise insists on its existing bank or Amex**
+
+| Provider type | How PurseString connects | Use case |
+|---|---|---|
+| **BaaS / issuer processors** (Lithic, Marqeta, Highnote) | REST APIs and webhooks | Instantly programmable Visa/Mastercard virtual cards. The primary engine for developer agents, browser-use bots, and low-to-mid dollar automated spend. |
+| **Direct bank / treasury APIs** (J.P. Morgan Access, Citi Connect) | ISO 20022 / open banking APIs | ACH, wire or SEPA Instant straight from a bank account. High-value B2B invoices ($1,000+) where cards aren't accepted because of fees. |
+| **Corporate Amex APIs** (Amex @ Work / commercial APIs) | Amex virtual card APIs | Amex-backed single-use virtual card numbers, for enterprises that want agents spending against their existing corporate Amex credit line. |
+
+**Why this makes the architecture solid:** governance is fully decoupled from the bank. The policy engine (`policies.yaml`) handles intent, idempotency and Slack approvals no matter which bank holds the cash, and routing picks the rail per purchase:
+
+```yaml
+# policies.yaml
+routes:
+  - rail: ach        # big B2B invoices where cards aren't accepted
+    min_amount: 1000
+  - rail: amex       # the enterprise's corporate Amex line
+    vendors: ["*.salesforce.com"]
+  - rail: lithic     # everything else under $500 on BaaS virtual cards
+    max_amount: 500
+```
+
+**MVP conclusion:** no partnership with traditional banks or Amex's closed ecosystem is needed on day one. The MVP connects to a BaaS sandbox (Lithic today, Highnote next), which gives full API control to issue real virtual cards instantly while we build the governance features developers and enterprises need.
+
 ## 💡 2. The Three Core Problems We Solve
 
 ### Problem 1: "Cards Are Easy, Governance Is Broken"
@@ -95,6 +144,8 @@ If the agent calls the payment tool again with identical intent within a 30-minu
 | 1 | **Repository setup:** public GitHub repo for the MCP server (TypeScript) | ✅ Done |
 | 2 | **Core MCP tool schema:** `submit_purchase_intent`, `request_ephemeral_card`, `check_policy_compliance` (plus `get_intent_status` for the HITL pause) | ✅ Done |
 | 3 | **Sandbox rails:** adapter backend for the Lithic sandbox (mock rail by default); Stripe Issuing test mode | ✅ Lithic · 🔜 Stripe ([#1](https://github.com/suseendar1414/pursestring/issues/1)) |
+| 3b | **Just-in-time authorization:** answer the issuer's real-time "approve this charge?" webhook against the approved intent; single-use cards close after 10 minutes | ✅ Lithic ASA · 🔜 Marqeta / Highnote |
+| 3c | **Rail routing:** pick the rail per purchase by amount, vendor and recurrence in `policies.yaml` | ✅ Done · 🔜 Highnote ([#13](https://github.com/suseendar1414/pursestring/issues/13)), Marqeta ([#14](https://github.com/suseendar1414/pursestring/issues/14)), Amex ([#15](https://github.com/suseendar1414/pursestring/issues/15)), ACH ([#16](https://github.com/suseendar1414/pursestring/issues/16)) |
 | 4 | **Slack interceptor:** async execution pause that pings a Slack webhook when `is_recurring: true`, limits are breached, or the vendor isn't allowlisted | ✅ Done (Discord too) · 🔜 one-click buttons ([#5](https://github.com/suseendar1414/pursestring/issues/5)) |
 
 See [how-it-works.md](how-it-works.md) for how each of these is implemented.

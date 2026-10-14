@@ -151,3 +151,24 @@ export function evaluate(
 
   return { decision, rules, summary };
 }
+
+/** Choose the rail for a purchase: the first matching route in policies.yaml, else adapter.type. */
+export function routeRail(policy: Policy, intent: PurchaseIntent): { rail: string; route: number | null } {
+  const i = policy.routes.findIndex(
+    (r) =>
+      (r.min_amount === undefined || intent.amount >= r.min_amount) &&
+      (r.max_amount === undefined || intent.amount < r.max_amount) &&
+      (r.recurring === undefined || r.recurring === intent.is_recurring) &&
+      (r.vendors === undefined || r.vendors.some((p) => domainMatches(intent.vendor_domain, p))),
+  );
+  return i === -1 ? { rail: policy.adapter.type, route: null } : { rail: policy.routes[i].rail, route: i };
+}
+
+/** "https://www.pdfocr.io" -> "pdfocr": the part of a domain a card statement descriptor usually contains. */
+export function vendorLabel(domain: string): string {
+  const parts = normalizeDomain(domain).split(".");
+  let i = parts.length - 2;
+  // pdfocr.co.uk, shop.com.au: skip the second-level public suffix.
+  if (i > 0 && ["co", "com", "org", "net", "gov", "ac", "edu"].includes(parts[i])) i--;
+  return (parts[Math.max(i, 0)] ?? "").replace(/[^a-z0-9]/g, "");
+}

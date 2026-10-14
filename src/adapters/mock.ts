@@ -33,6 +33,8 @@ function detailsFor(token: string) {
 /** In-process sandbox rail. No network, no money. The default until a real rail is configured. */
 export class MockAdapter implements CardAdapter {
   readonly name = "mock";
+  readonly kind = "card" as const;
+  readonly closed = new Set<string>();
 
   async issueCard(req: IssueCardRequest): Promise<CardDetails> {
     const token = `mock_${randomUUID()}`;
@@ -50,5 +52,9 @@ export class MockAdapter implements CardAdapter {
 
   async getCard(ref: CardReference): Promise<CardDetails> {
     return { ...ref, ...detailsFor(ref.token) };
+  }
+
+  async closeCard(ref: CardReference): Promise<void> {
+    this.closed.add(ref.token);
   }
 }

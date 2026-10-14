@@ -15,7 +15,7 @@ Thanks for helping make agent spending safe. You don't need payments experience 
 git clone https://github.com/suseendar1414/pursestring.git
 cd pursestring
 npm install       # installs and builds
-npm test          # 19 tests, no network needed
+npm test          # 33 tests, no network needed
 npm run dev       # run the MCP server from source over stdio
 ```
 
@@ -40,7 +40,9 @@ Use a scratch state directory so you don't mix test data with your own: `PURSEST
 1. Create `src/adapters/<rail>.ts` implementing `CardAdapter` from `src/adapters/types.ts`:
    - `issueCard(req)` creates a card capped at `req.amount`. When `req.single_use` is true it must close after one authorization; otherwise lock it to the merchant with a monthly cap.
    - `getCard(ref)` re-fetches the same card by `ref.token`. This is what makes retries return the same card, so don't create a new card here.
-2. Register it in `src/adapters/index.ts` and add its option to `adapter.type` in `src/config.ts`.
+   - Set `kind` to `"card"` or `"bank_transfer"`, and implement `closeCard(ref)` if the rail can close cards (single-use cards are closed when their TTL ends).
+   - If the rail can ask for real-time authorization (like Lithic ASA), add an endpoint in `src/http.ts` that verifies the rail's signature and calls `gov.authorize()`.
+2. Register it in `src/adapters/index.ts`. Rails that are named but not built yet live in `src/adapters/planned.ts`: replace the entry there and add it to `RAILS` in `src/config.ts` if it's new.
 3. Never write card numbers or CVVs to disk or logs. Return them only in `CardDetails`.
 4. Add tests that stub `fetch` (see how `test/helpers.ts` wraps the mock adapter), and a section in `docs/deploy.md`.
 

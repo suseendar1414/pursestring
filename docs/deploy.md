@@ -193,7 +193,22 @@ Without `PURSESTRING_ADMIN_TOKEN` the API is disabled.
 
 Card numbers come back to the agent in the tool result and are never written to `state.json` or the log; replays re-fetch the card from Lithic by its token. Your Lithic key needs access to card PAN/CVV for this to work.
 
-To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER=mock` or `PURSESTRING_ADAPTER=lithic`.
+### Real-time authorization (Lithic ASA)
+
+With Auth Stream Access, Lithic asks PurseString to approve every charge on its cards as it happens, so a card can only be used for the purchase it was approved for.
+
+1. Run PurseString in HTTP mode somewhere Lithic can reach over HTTPS (the Docker image behind your reverse proxy).
+2. Enroll your endpoint `https://<your-host>/jit/lithic` for ASA in Lithic (dashboard or the ASA enrollment API).
+3. Fetch your ASA HMAC secret from Lithic's "retrieve ASA HMAC secret" endpoint and set it as `LITHIC_WEBHOOK_SECRET`. Requests without a valid signature get `401`, and the endpoint stays off (`503`) until the secret is set.
+4. Use Lithic's sandbox transaction simulator to send an authorization and watch `pursestring log` for a `jit_authorization` entry.
+
+To try the logic without Lithic, use the mock rail: `pursestring simulate-charge <intent_id> 15 --merchant "PDFOCR.IO"`.
+
+### Routing purchases to different rails
+
+`routes` in `policies.yaml` picks the rail per purchase (by amount, vendor or recurrence). See [policies.md](policies.md#rail-routing).
+
+To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER` to a rail name (for example `mock` or `lithic`).
 
 ## Environment variables
 
@@ -208,7 +223,8 @@ To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER=mock` or
 | `SLACK_WEBHOOK_URL` | unset | Slack approval requests |
 | `DISCORD_WEBHOOK_URL` | unset | Discord approval requests |
 | `LITHIC_API_KEY` | unset | Use Lithic cards |
-| `PURSESTRING_ADAPTER` | from policy | Force `mock` or `lithic` |
+| `LITHIC_WEBHOOK_SECRET` | unset | Lithic ASA HMAC key; enables real-time authorization at `/jit/lithic` |
+| `PURSESTRING_ADAPTER` | from policy | Force the default rail |
 
 ## Production checklist
 

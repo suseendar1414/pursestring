@@ -4,6 +4,22 @@ import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 
+export const RAILS = ["mock", "lithic", "highnote", "marqeta", "amex", "ach"] as const;
+const RailName = z.enum(RAILS);
+export type RailName = z.infer<typeof RailName>;
+
+const RouteSchema = z.object({
+  rail: RailName,
+  /** Matches when amount >= min_amount. */
+  min_amount: z.number().nonnegative().optional(),
+  /** Matches when amount < max_amount. */
+  max_amount: z.number().positive().optional(),
+  recurring: z.boolean().optional(),
+  /** Vendor patterns, same syntax as the allowlist. */
+  vendors: z.array(z.string()).optional(),
+});
+export type Route = z.infer<typeof RouteSchema>;
+
 const PolicySchema = z.object({
   version: z.literal(1).default(1),
   currency: z.string().length(3).default("USD"),
@@ -63,7 +79,8 @@ const PolicySchema = z.object({
     .default({}),
   adapter: z
     .object({
-      type: z.enum(["mock", "lithic"]).default("mock"),
+      /** The rail used when no route matches. */
+      type: RailName.default("mock"),
       lithic: z
         .object({
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
@@ -71,6 +88,24 @@ const PolicySchema = z.object({
         .default({ environment: "sandbox" }),
     })
     .default({ type: "mock", lithic: { environment: "sandbox" } }),
+  /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
+  routes: z.array(RouteSchema).default([]),
+  cards: z
+    .object({
+      /** Single-use cards are closed this many minutes after issue. Recurring cards don't expire. */
+      ttl_minutes: z.number().positive().default(10),
+    })
+    .default({ ttl_minutes: 10 }),
+  jit: z
+    .object({
+      /** Answer the issuer's real-time authorization webhook (Lithic ASA). */
+      enabled: z.boolean().default(true),
+      /** Allow an authorization this much above the approved amount (tax, FX). */
+      tolerance_percent: z.number().nonnegative().default(0),
+      /** Decline when the merchant descriptor doesn't mention the vendor's name. */
+      require_merchant_match: z.boolean().default(false),
+    })
+    .default({ enabled: true, tolerance_percent: 0, require_merchant_match: false }),
 });
 
 export type Policy = z.infer<typeof PolicySchema>;
@@ -81,6 +116,8 @@ export interface Config {
   homeDir: string;
   env: {
     lithicApiKey?: string;
+    /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
+    lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
     discordWebhookUrl?: string;
   };
@@ -120,6 +157,7 @@ export function loadConfig(): Config {
 
   const env = {
     lithicApiKey: process.env.LITHIC_API_KEY || undefined,
+    lithicWebhookSecret: process.env.LITHIC_WEBHOOK_SECRET || undefined,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,
   };
@@ -128,8 +166,9 @@ export function loadConfig(): Config {
   if (env.lithicApiKey && !process.env.PURSESTRING_ADAPTER && policy.adapter.type === "mock") {
     policy.adapter.type = "lithic";
   }
-  if (process.env.PURSESTRING_ADAPTER === "mock" || process.env.PURSESTRING_ADAPTER === "lithic") {
-    policy.adapter.type = process.env.PURSESTRING_ADAPTER;
+  const forced = process.env.PURSESTRING_ADAPTER;
+  if (forced && (RAILS as readonly string[]).includes(forced)) {
+    policy.adapter.type = forced as RailName;
   }
 
   return { policy, policyPath, homeDir, env };

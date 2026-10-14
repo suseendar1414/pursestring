@@ -13,6 +13,7 @@ services:
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       LITHIC_API_KEY: ${LITHIC_API_KEY:-}               # set to use Lithic sandbox cards instead of the mock rail
+      LITHIC_WEBHOOK_SECRET: ${LITHIC_WEBHOOK_SECRET:-} # Lithic ASA HMAC key: real-time authorization at /jit/lithic
     volumes:
       - ./policies.yaml:/config/policies.yaml:ro
       - pursestring-data:/data                              # state.json + decisions.jsonl (the audit log)

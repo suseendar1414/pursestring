@@ -23,7 +23,7 @@ Every rule is evaluated for every intent and recorded in the audit log, pass or 
 | `hard_limits.per_agent_daily_budget` | this spend would take the agent over today's budget | human |
 | `auto_approve` | spend falls outside the auto-approve envelope | human |
 
-Auto-approvals are checked again against the daily budget when the card is requested, so two quick purchases can't both slip under it.
+Auto-approvals are checked again against the daily budget when the card is requested, so two quick purchases can't both slip under it. After a card is issued, every charge on it is checked again in real time; see [just-in-time authorization](how-it-works.md#just-in-time-authorization).
 
 ## Full schema with defaults
 
@@ -64,10 +64,36 @@ notifications:
   discord_webhook_url:            # or DISCORD_WEBHOOK_URL
 
 adapter:
-  type: mock                      # mock | lithic
+  type: mock                      # default rail: mock | lithic | highnote | marqeta | amex | ach
   lithic:
     environment: sandbox          # sandbox | production
+
+routes: []                        # see "Rail routing" below
+
+cards:
+  ttl_minutes: 10                 # single-use cards close this long after issue
+
+jit:
+  enabled: true                   # answer the issuer's real-time authorization webhook
+  tolerance_percent: 0            # allow this much over the approved amount
+  require_merchant_match: false   # decline when the descriptor doesn't mention the vendor
 ```
+
+## Rail routing
+
+Each route can match on `min_amount` (inclusive), `max_amount` (exclusive), `recurring` and `vendors` (allowlist syntax). The first route whose conditions all match picks the rail; with no match, `adapter.type` is used.
+
+```yaml
+routes:
+  - rail: ach                     # big B2B invoices where cards aren't accepted
+    min_amount: 1000
+  - rail: amex                    # the company's corporate Amex line
+    vendors: ["*.salesforce.com"]
+  - rail: lithic                  # everything else under $500 on BaaS virtual cards
+    max_amount: 500
+```
+
+`highnote`, `marqeta`, `amex` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
 
 ## Vendor matching
 

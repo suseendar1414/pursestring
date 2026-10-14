@@ -46,6 +46,27 @@ notifications:
   # discord_webhook_url: https://discord.com/api/webhooks/...
 
 adapter:
-  type: mock                      # mock | lithic  (LITHIC_API_KEY in the env switches to lithic automatically)
+  # The default rail. mock | lithic work today; highnote | marqeta | amex | ach are planned.
+  # LITHIC_API_KEY in the env switches the default to lithic automatically.
+  type: mock
   lithic:
     environment: sandbox
+
+# Pick a rail per purchase. First match wins; no match uses adapter.type.
+routes: []
+#  - rail: ach                     # big B2B invoices where cards aren't accepted
+#    min_amount: 1000
+#  - rail: amex                    # spend on the company's corporate Amex line
+#    vendors: ["*.salesforce.com"]
+#  - rail: lithic                  # everything else under $500 on BaaS virtual cards
+#    max_amount: 500
+
+cards:
+  ttl_minutes: 10                 # single-use cards close this long after issue; subscriptions don't expire
+
+jit:
+  # Real-time authorization: the issuer asks "merchant X wants $45 on this card, approve?"
+  # PurseString approves only charges that match the approved intent. Needs LITHIC_WEBHOOK_SECRET for Lithic.
+  enabled: true
+  tolerance_percent: 0            # allow this much over the approved amount (tax, FX)
+  require_merchant_match: false   # decline when the merchant descriptor doesn't mention the vendor

@@ -41,6 +41,7 @@ function view(rec: IntentRecord) {
   return {
     intent_id: rec.intent_id,
     status: rec.status,
+    rail: rec.rail,
     decision: rec.evaluation.decision,
     summary: rec.evaluation.summary,
     failed_rules: rec.evaluation.rules.filter((r) => !r.passed).map(({ rule, detail }) => ({ rule, detail })),
@@ -132,7 +133,9 @@ export function createMcpServer(gov: Governance): McpServer {
           replayed,
           note: replayed
             ? "Duplicate prevented: this is the card already issued for this intent. No new transaction was created."
-            : `New ${card.single_use ? "single-use" : "merchant-locked recurring"} card issued.`,
+            : card.single_use
+              ? `New single-use card issued. Use it once, before ${card.expires_at}; after that it is closed.`
+              : "New merchant-locked recurring card issued, capped per month.",
           card: {
             number: card.pan,
             cvv: card.cvv,
@@ -142,6 +145,7 @@ export function createMcpServer(gov: Governance): McpServer {
             spend_limit: card.spend_limit,
             currency: card.currency,
             single_use: card.single_use,
+            expires_at: card.expires_at,
             rail: card.adapter,
           },
           use_only_at: record.intent.vendor_domain,

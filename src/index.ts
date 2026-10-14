@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createAdapter } from "./adapters/index.js";
+import { Rails } from "./adapters/index.js";
 import { loadConfig } from "./config.js";
 import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
@@ -23,6 +23,9 @@ Usage:
   pursestring approve <intent_id> [--by name] [--note text]
   pursestring deny <intent_id> [--by name] [--note text]
   pursestring log [-n 20]          Show the latest decision-log entries
+  pursestring simulate-charge <intent_id> <amount> [--merchant "PDFOCR.IO"]
+                                Pretend the merchant charged the intent's card and show the
+                                real-time authorization decision (works with the mock rail)
   pursestring policy               Print the active policy and where it was loaded from
 
 Environment:
@@ -31,6 +34,7 @@ Environment:
   SLACK_WEBHOOK_URL    Slack incoming webhook for approval requests
   DISCORD_WEBHOOK_URL  Discord webhook for approval requests
   LITHIC_API_KEY       Use Lithic virtual cards (sandbox by default) instead of the mock rail
+  LITHIC_WEBHOOK_SECRET  Lithic ASA HMAC key; enables real-time authorization at POST /jit/lithic
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
   PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API
 `;
@@ -38,8 +42,15 @@ Environment:
 function build() {
   const config = loadConfig();
   const store = new Store(config.homeDir);
-  const gov = new Governance(config, store, createAdapter(config), new WebhookNotifier(config));
+  const gov = new Governance(config, store, new Rails(config), new WebhookNotifier(config));
   return { config, store, gov };
+}
+
+/** Close expired single-use cards in the background while the server runs. */
+function startSweeper(gov: Governance) {
+  const tick = () => void gov.sweepExpiredCards().catch((err) => console.error(`[pursestring] card sweep failed: ${err}`));
+  tick();
+  setInterval(tick, 30_000).unref();
 }
 
 async function main() {
@@ -51,12 +62,13 @@ async function main() {
       host: { type: "string" },
       by: { type: "string" },
       note: { type: "string" },
+      merchant: { type: "string" },
       n: { type: "string", short: "n" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
   });
-  const [cmd = "serve", arg] = positionals;
+  const [cmd = "serve", arg, arg2] = positionals;
 
   if (values.help || cmd === "help") return void process.stdout.write(HELP);
   if (values.version) return void console.log(VERSION);
@@ -64,6 +76,7 @@ async function main() {
   switch (cmd) {
     case "serve": {
       const { config, gov } = build();
+      startSweeper(gov);
       if (values.http || process.env.PURSESTRING_TRANSPORT === "http") {
         startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1");
         return;
@@ -71,7 +84,7 @@ async function main() {
       const server = createMcpServer(gov);
       await server.connect(new StdioServerTransport());
       console.error(
-        `[pursestring] stdio server ready (rail: ${gov.adapter.name}, policy: ${config.policyPath ?? "built-in defaults"}, home: ${config.homeDir})`,
+        `[pursestring] stdio server ready (rail: ${gov.rails.default}, policy: ${config.policyPath ?? "built-in defaults"}, home: ${config.homeDir})`,
       );
       return;
     }
@@ -101,6 +114,19 @@ async function main() {
       const { gov } = build();
       const rec = gov.decide(arg, cmd === "approve", values.by ?? process.env.USER ?? "cli", values.note);
       console.log(`${rec.intent_id} is now ${rec.status}.`);
+      return;
+    }
+    case "simulate-charge": {
+      if (!arg || !arg2) throw new Error("usage: pursestring simulate-charge <intent_id> <amount> [--merchant NAME]");
+      const { gov } = build();
+      const rec = gov.store.get(arg);
+      if (!rec?.card) throw new Error(`${arg} has no card yet. Call request_ephemeral_card first.`);
+      const d = gov.authorize({
+        card_token: rec.card.token,
+        amount: Number(arg2),
+        merchant: values.merchant ?? rec.intent.vendor_domain,
+      });
+      console.log(`${d.approved ? "APPROVED" : "DECLINED"} (${d.code}) in ${d.latency_ms} ms: ${d.reason}`);
       return;
     }
     case "log": {

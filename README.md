@@ -46,9 +46,11 @@ AI agents can now buy things: API credits, SaaS seats, datasets, cloud resources
 | 🛑 **No double charges** | Every intent gets a deterministic key, `SHA256(agent_id, task_id, vendor, amount)`. Retry inside 30 minutes and you get the **same card back**, not a second transaction. |
 | 📆 **No surprise subscriptions** | Anything marked `is_recurring` goes to a human, whatever the amount. Approved subscriptions get a merchant-locked card with a monthly cap, so they can't be reused elsewhere. |
 | 🙋 **Approve by risk, not by dollar amount** | Small, one-time, allowlisted spend is auto-approved. Recurring, over-threshold or unknown-vendor spend pauses and pings Slack or Discord. Blocklisted vendors and spend over the hard cap are refused outright. |
+| ⚡ **Every charge checked as it happens** | With just-in-time authorization, the card issuer asks PurseString before each charge goes through. Only a charge that matches the approved intent (right card, right amount, first use, still live) is approved. |
+| ⏱️ **Cards that close themselves** | Single-use cards close 10 minutes after issue, so a leaked number is worthless. |
 | 🧠 **Intent before money** | The agent must state the goal and the free alternatives it tried. A vague goal or no alternatives means a human looks first. |
 | 📼 **A black box recorder for every purchase** | Goal, alternatives, the agent's reasoning, every rule and how it ruled, who approved, and which card was issued, as append-only JSON lines. Card numbers are never written to disk. |
-| 🔌 **Rail-agnostic** | A two-method adapter interface. Ships with a mock rail and **Lithic** virtual cards (sandbox and production). Stripe Issuing and x402/USDC are [next](#-roadmap). |
+| 🔌 **Rail-agnostic, routed by policy** | `routes` in `policies.yaml` picks the rail per purchase: BaaS virtual cards for everyday spend, the corporate Amex line for chosen vendors, ACH for big invoices. Ships with a mock rail and **Lithic** (sandbox and production). Highnote, Marqeta, Amex, ACH, Stripe Issuing and x402 are [next](#-roadmap). |
 | 🏠 **Self-hosted, Apache 2.0** | Runs on your laptop or in your VPC. Your card credentials never leave your infrastructure. |
 
 ## 🤝 Use it with your rail, not instead of it
@@ -61,6 +63,7 @@ PurseString doesn't replace your card issuer. It's the policy layer on top, and 
 | One policy across several rails | Each rail has its own | ✅ |
 | Agent must declare goal and alternatives | | ✅ |
 | Intent-level duplicate-charge protection | | ✅ |
+| Real-time approval checked against *why* the card was issued | | ✅ |
 | Recurring charges always routed to a human | | ✅ |
 | Reasoning-level audit trail ("why did it buy this?") | | ✅ |
 | Open source, self-hosted | | ✅ |
@@ -142,8 +145,11 @@ flowchart LR
     I["Intent check"] --> D["Idempotency lock"] --> P["Policy engine<br/>auto · human · deny"] --> L["Decision log"]
   end
   P -.->|"risky spend"| H["Slack / Discord<br/>human approves"]
-  S -->|"approved only"| R["Payment adapter"]
-  R --> C["Lithic · Stripe Issuing*<br/>x402 / USDC* · mock"]
+  S -->|"approved only, routed by policy"| R["Payment adapters"]
+  R --> C1["BaaS virtual cards<br/>Lithic · Highnote* · Marqeta*"]
+  R --> C2["Corporate cards<br/>Amex*"]
+  R --> C3["Bank transfers<br/>ACH / wire*"]
+  C1 -.->|"real-time: approve this charge?"| S
 ```
 <sub>* on the roadmap, contributions welcome</sub>
 
@@ -155,6 +161,11 @@ Deep dive: **[docs/how-it-works.md](docs/how-it-works.md)**. Policy reference: *
 - [x] Idempotency locks, single-use cards, decision log
 - [x] Slack / Discord approval pause, CLI and HTTP approve/deny
 - [x] Mock rail, Lithic virtual cards, Docker image
+- [x] Just-in-time authorization (Lithic ASA), cards that close after 10 minutes
+- [x] Policy-based rail routing
+- [ ] Highnote and Marqeta adapters
+- [ ] Amex corporate virtual cards
+- [ ] ACH / wire bank transfers
 - [ ] Stripe Issuing test-mode adapter
 - [ ] x402 / USDC adapter
 - [ ] One-click Slack approve/deny buttons

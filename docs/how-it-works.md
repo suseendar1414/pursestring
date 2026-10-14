@@ -29,6 +29,54 @@ sequenceDiagram
   S-->>A: same card, replayed: true (no new charge)
 ```
 
+## Rail routing
+
+At submit time, policy picks the rail for the purchase from `routes` in `policies.yaml` (first match on amount, vendor and recurrence, else `adapter.type`). The rail is recorded on the intent, shown to the approver in Slack, and returned to the agent. A purchase routed to a bank-transfer rail never gets a card.
+
+| Rail | Kind | Status |
+|---|---|---|
+| `mock` | card | ✅ test cards, no network |
+| `lithic` | card | ✅ sandbox and production, JIT authorization via ASA |
+| `highnote` | card | planned (commercial charge cards) |
+| `marqeta` | card | planned (JIT funding) |
+| `amex` | card | planned (Amex single-use virtual numbers on a corporate line) |
+| `ach` | bank transfer | planned (ACH / wire / SEPA via treasury APIs) |
+
+A planned rail can already be named in `routes`; a purchase routed to it stops with an error that links to its issue, instead of silently falling back to another rail.
+
+## Just-in-time authorization
+
+Issuing a card capped at the amount is the first line of defence. The second is answering the issuer's real-time authorization webhook. When a merchant charges a PurseString card, the issuer asks *"Merchant X wants $45 on card Y. Approve?"* and PurseString checks the charge against the intent the card was issued for:
+
+```mermaid
+sequenceDiagram
+  participant M as Merchant
+  participant N as Visa / Mastercard
+  participant I as Issuer (Lithic)
+  participant S as PurseString
+  M->>N: charge $15.00 on card ••4242
+  N->>I: authorization request
+  I->>S: POST /jit/lithic (signed)
+  S->>S: find intent by card, check live, amount, uses, merchant
+  S-->>I: { token, result: "APPROVED" }
+  I-->>N: approved
+  Note over S: decision + latency written to the audit log
+```
+
+| Check | Declines with (Lithic ASA result) |
+|---|---|
+| The card belongs to a PurseString intent that has a card issued | `CARD_PAUSED` |
+| A single-use card is still inside its TTL and not closed | `CARD_PAUSED` |
+| A single-use card hasn't been charged before | `VELOCITY_EXCEEDED` |
+| The amount is within the approved amount (+ `jit.tolerance_percent`); for subscriptions, within the monthly cap | `INSUFFICIENT_FUNDS` |
+| The merchant descriptor mentions the vendor (only if `jit.require_merchant_match`) | `UNAUTHORIZED_MERCHANT` |
+
+Decisions are local (one locked JSON read) and take a few milliseconds, well inside Lithic's 6-second limit. Requests must carry a valid [Standard Webhooks](https://www.standardwebhooks.com) signature made with your Lithic ASA HMAC key (`LITHIC_WEBHOOK_SECRET`). Other rails can call the generic `POST /jit/authorize` with the admin token. To try it locally on the mock rail: `pursestring simulate-charge <intent_id> <amount>`.
+
+## Short-lived cards
+
+Single-use cards close `cards.ttl_minutes` (default 10) after issue. JIT authorization declines them from that moment, `request_ephemeral_card` stops replaying them, and a background sweep closes them at the rail. Approved subscriptions get a merchant-locked card with a monthly cap instead, since they have to keep renewing.
+
 ## The intent
 
 | Field | Why it's required |
@@ -55,11 +103,12 @@ stateDiagram-v2
   issuing --> card_issued
   issuing --> approved: rail error
   card_issued --> card_issued: retry inside window (same card)
+  card_issued --> card_issued: JIT authorization (approve / decline)
 ```
 
 ## The decision log
 
-`$PURSESTRING_HOME/decisions.jsonl` is append-only, one JSON object per event. Events: `policy_checked`, `intent_submitted`, `duplicate_intent_blocked`, `human_approved`, `human_denied`, `card_issued`, `card_replayed`, `card_issue_failed`.
+`$PURSESTRING_HOME/decisions.jsonl` is append-only, one JSON object per event. Events: `policy_checked`, `intent_submitted`, `duplicate_intent_blocked`, `human_approved`, `human_denied`, `card_issued`, `card_replayed`, `card_issue_failed`, `jit_authorization`, `card_closed`, `card_close_failed`.
 
 An `intent_submitted` entry carries the full reasoning tree:
 
@@ -95,8 +144,10 @@ An adapter is two methods:
 ```ts
 interface CardAdapter {
   readonly name: string;
+  readonly kind: "card" | "bank_transfer";
   issueCard(req: IssueCardRequest): Promise<CardDetails>;   // create a card capped at req.amount
   getCard(ref: CardReference): Promise<CardDetails>;        // re-fetch a card by token, for replays
+  closeCard?(ref: CardReference): Promise<void>;            // close a single-use card when its time is up
 }
 ```
 
@@ -108,9 +159,10 @@ interface CardAdapter {
 |---|---|
 | `src/server.ts` | The four MCP tools and what the agent is told after each call |
 | `src/governance.ts` | The control plane: submit, dedupe, issue, replay, approve |
-| `src/policy.ts` | Pure rule evaluation and domain matching |
+| `src/policy.ts` | Pure rule evaluation, rail routing and domain matching |
 | `src/store.ts` | Locked JSON state, idempotency key, audit log |
 | `src/notify.ts` | Slack and Discord webhooks |
-| `src/adapters/` | Payment rails |
-| `src/http.ts` | Streamable HTTP transport and the approval API |
+| `src/adapters/` | Payment rails (`planned.ts` holds the not-yet-built ones) |
+| `src/webhooks.ts` | Standard Webhooks signature verification for issuer callbacks |
+| `src/http.ts` | Streamable HTTP transport, the approval API and the JIT endpoints |
 | `src/index.ts` | CLI entry point |

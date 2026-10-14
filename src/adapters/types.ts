@@ -17,7 +17,11 @@ export interface IssueCardRequest {
  */
 export interface CardAdapter {
   readonly name: string;
+  /** "card" rails mint virtual cards; "bank_transfer" rails move money by ACH / wire / SEPA. */
+  readonly kind: "card" | "bank_transfer";
   issueCard(req: IssueCardRequest): Promise<CardDetails>;
   /** Re-fetch full card details from a stored reference, used to replay idempotent requests. */
   getCard(ref: CardReference): Promise<CardDetails>;
+  /** Close a card so it can't be used again. Called when a single-use card's time is up. */
+  closeCard?(ref: CardReference): Promise<void>;
 }
