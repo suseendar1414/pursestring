@@ -24,9 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t pursestring:ci .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pursestring:ci
       - name: Smoke test
         run: |
-          docker run -d --name s -p 8787:8787 pursestring:ci
+          if ! out=$(docker run -d --name s -p 8787:8787 pursestring:ci 2>&1); then
+            echo "::error::docker run failed: $out"; docker images; exit 1
+          fi
           for i in $(seq 1 20); do curl -fs localhost:8787/healthz && exit 0; sleep 1; done
-          docker logs s; exit 1
+          echo "::error::healthz never answered: $(docker logs s 2>&1 | tail -5 | tr '\n' ' ')"; exit 1
