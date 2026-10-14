@@ -20,6 +20,7 @@
   <a href="docs/deploy.md">Deploy</a> ·
   <a href="docs/policies.md">Policies</a> ·
   <a href="docs/how-it-works.md">How it works</a> ·
+  <a href="docs/VISION.md">Vision</a> ·
   <a href="https://discord.gg/YOUR_INVITE">Discord</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
@@ -162,6 +163,19 @@ Deep dive: **[docs/how-it-works.md](docs/how-it-works.md)**. Policy reference: *
 - [ ] Framework examples: LangGraph, CrewAI, Vercel AI SDK, OpenAI Agents SDK
 
 Want one of these? Grab a [good first issue](https://github.com/suseendar1414/pursestring/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and comment "I'd like to take this".
+
+## 🧭 Open core
+
+PurseString is open core. Everything in this repository is free and stays Apache 2.0: the MCP server, `policies.yaml`, the decision log, the approval pause, and the card adapters. A hosted **PurseString Cloud** for teams running agents in production is planned on top of it:
+
+| Community core (this repo, free) | PurseString Cloud (planned) |
+|---|---|
+| Self-hosted MCP server, YAML policies | Audit dashboard with visual decision trees for every charge |
+| Local JSON decision log | One-click Slack / Teams approvals |
+| Slack / Discord approval pause | Role-based access: policies per department, project or agent squad |
+| Sandbox card adapters (Lithic, Stripe Issuing) | Enterprise rails: Amex, bank ACH / wires, ERP purchase orders |
+
+The full product vision is in **[docs/VISION.md](docs/VISION.md)**.
 
 ## 💬 Community
 
