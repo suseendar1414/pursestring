@@ -2,12 +2,23 @@
 
 ## Executive Summary
 
-- **The Core Thesis:** Cards are the easy part. Existing fintech issuers (Ramp, Stripe, Lithic) give agents spend limits, but they don't evaluate intent, prevent duplicate-charge loops, or log decision reasoning.
-- **The Solution:** An open-source, rail-agnostic governance server (built on MCP) that sits between AI agents and financial rails. It enforces intent-based policy rules, handles idempotency, provides human-in-the-loop (HITL) gates, and logs an auditable "black box" reasoning tree before executing any financial action.
+> **PurseString is a universal, open-source financial interface that lets AI agents access and use financial services safely, with consistent governance across providers.**
+
+It lets AI agents connect to a company's banks, payment providers and card issuers through one MCP interface, while enforcing spending rules before any financial action is executed.
+
+| Pillar | What it means | Status today |
+|---|---|---|
+| 🔌 **Connect** | Integrates banks, payment providers and card issuers through community-built adapters. | 🟡 Lithic virtual cards (sandbox and production) and a mock rail. Existing bank accounts, Highnote, Marqeta, Amex, Stripe Issuing and x402 are on the roadmap. |
+| 🛡️ **Govern** | Enforces budgets, vendor restrictions and human approvals. | ✅ Live: `policies.yaml`, daily budgets, allow / block lists, Slack and Discord approval pause, per-purchase routing. |
+| 💳 **Execute** | Enables authorized payments and other supported financial operations. | 🟡 Single-use and merchant-locked virtual cards. Bank transfers are on the roadmap ([#16](https://github.com/suseendar1414/pursestring/issues/16)). |
+| 🔒 **Protect** | Prevents duplicate operations, handles uncertain payment states, and records every decision. | ✅ Live for cards: idempotency keys, safe retries, real-time charge checks, cards that close after 10 minutes, audit log. Reconciling uncertain bank-transfer states comes with #16. |
+| 🌍 **Expand** | Lets developers contribute integrations for additional providers and countries. | ✅ Adapter interface and contributor guide; first community adapters wanted ([#13](https://github.com/suseendar1414/pursestring/issues/13) to [#16](https://github.com/suseendar1414/pursestring/issues/16)). |
+
+**Why governance is the core:** cards are the easy part. Issuers like Ramp, Stripe and Lithic give agents spend limits, but they don't evaluate intent, prevent duplicate-charge loops, or log the reasoning behind a payment. PurseString enforces intent-based policy, idempotency, human-in-the-loop gates and an auditable "black box" reasoning log before executing any financial action, the same way on every provider.
 
 ## ⚙️ 1. Architecture & Universal Adapter Pattern
 
-PurseString acts as the central control plane between any AI agent framework (Claude, Cursor, LangChain, CrewAI) and any financial rail (BaaS, corporate banks, or crypto).
+PurseString is the one interface and control plane between any AI agent framework (Claude, Cursor, LangChain, CrewAI) and any financial rail (BaaS, corporate banks, or crypto).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -17,7 +28,7 @@ PurseString acts as the central control plane between any AI agent framework (Cl
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│          PURSESTRING: SPENDING GOVERNANCE SERVER (MCP)       │
+│       PURSESTRING: FINANCIAL INTERFACE + GOVERNANCE (MCP)   │
 │ ─────────────────────────────────────────────────────────── │
 │  1. Intent Verification (Goal + Alternatives Evaluated)     │
 │  2. Idempotency Lock Engine (Prevents double-charges)       │

@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="PurseString: the open-source policy layer between your AI agents and your money" width="100%">
+  <img src="assets/banner.svg" alt="PurseString: the open-source financial interface for AI agents" width="100%">
 </p>
 
 <p align="center">
-  <b>Open-source alternative to closed agent-card controls like Ramp Agent Cards, for any payment rail.</b><br>
-  Your agent has a card. PurseString gives it judgment.
+  <b>A universal, open-source financial interface that lets AI agents use financial services safely,<br>with the same governance across every provider.</b><br>
+  One MCP server. Your spending rules enforced before any money moves.
 </p>
 
 <p align="center">
@@ -27,19 +27,31 @@
 
 ---
 
-AI agents can now buy things: API credits, SaaS seats, datasets, cloud resources. Card issuers already give them spend caps and merchant locks. What they don't give you is **judgment**:
+AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resources, invoices. Every bank, card issuer and payment provider gives them a different API, and none of them knows *why* the agent is spending. That's how you end up with:
 
-- 🔁 A checkout page hangs, the agent assumes it failed, retries, and **you pay twice**.
+- 🔁 A checkout page hangs, the agent retries, and **you pay twice**.
 - 📆 A $15 "trial" fits under the $50 cap and **auto-renews forever**.
 - 🤷 Finance asks "what was this charge?" and **nobody can say why the agent bought it**.
 
-**PurseString** is a self-hosted [MCP](https://modelcontextprotocol.io) server that sits between your agents and your payment rail. Before any money moves, the agent has to declare *what* it's buying, *why*, and *what it tried first*. PurseString checks that intent against your `policies.yaml`, blocks duplicate charges, pauses risky spend for a human in Slack or Discord, and writes every decision to an audit log. Only then does it issue a single-use virtual card capped at the approved amount.
+**PurseString** is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives agents one interface to financial services and enforces your spending rules before anything is executed. The agent declares *what* it wants to pay for, *why*, and *what it tried first*. PurseString checks that against your `policies.yaml`, blocks duplicates, pauses risky spend for a human in Slack or Discord, records the decision, and only then executes it on the right provider.
 
 > [!NOTE]
 > 🎬 **Demo GIF coming soon:** an agent retries a hung checkout and PurseString returns the same card instead of charging twice.
 <!-- Replace the note above with: <p align="center"><img src="assets/demo.gif" width="720"></p> -->
 
-## ✨ What it does
+## 🧩 What it does, and what works today
+
+| | | Status |
+|---|---|---|
+| 🔌 **Connect** | Banks, payment providers and card issuers behind one MCP interface, through community-built adapters. | 🟡 **Virtual cards via [Lithic](https://lithic.com)** (sandbox and production), plus a mock rail for testing. Not yet: existing bank accounts and other providers ([see roadmap](#-roadmap)). |
+| 🛡️ **Govern** | Budgets, vendor allow and block lists, and human approvals, defined once and enforced the same way on every provider. | ✅ **Live:** `policies.yaml`, per-agent daily budgets, Slack / Discord approval pause, per-purchase rail routing. |
+| 💳 **Execute** | Authorized payments and other supported financial operations. | 🟡 **Single-use and merchant-locked virtual cards** today. Bank transfers (ACH / wire) are on the roadmap ([#16](https://github.com/suseendar1414/pursestring/issues/16)). |
+| 🔒 **Protect** | No duplicate operations, safe handling of uncertain payment states, and a record of every decision. | ✅ **Live:** idempotency keys, safe retries after a hung checkout, real-time checks on every card charge, cards that close after 10 minutes, append-only audit log. |
+| 🌍 **Expand** | Developers add integrations for more providers and countries. | ✅ **Live:** a small adapter interface and a [contributor guide](CONTRIBUTING.md#adding-a-payment-rail). The first community adapters are [up for grabs](https://github.com/suseendar1414/pursestring/issues?q=is%3Aissue+is%3Aopen+label%3Aadapter). |
+
+<sub>✅ live today · 🟡 partly live, more on the roadmap</sub>
+
+### Govern and Protect in detail
 
 | | |
 |---|---|
@@ -49,13 +61,13 @@ AI agents can now buy things: API credits, SaaS seats, datasets, cloud resources
 | ⚡ **Every charge checked as it happens** | With just-in-time authorization, the card issuer asks PurseString before each charge goes through. Only a charge that matches the approved intent (right card, right amount, first use, still live) is approved. |
 | ⏱️ **Cards that close themselves** | Single-use cards close 10 minutes after issue, so a leaked number is worthless. |
 | 🧠 **Intent before money** | The agent must state the goal and the free alternatives it tried. A vague goal or no alternatives means a human looks first. |
-| 📼 **A black box recorder for every purchase** | Goal, alternatives, the agent's reasoning, every rule and how it ruled, who approved, and which card was issued, as append-only JSON lines. Card numbers are never written to disk. |
-| 🔌 **Rail-agnostic, routed by policy** | `routes` in `policies.yaml` picks the rail per purchase: BaaS virtual cards for everyday spend, the corporate Amex line for chosen vendors, ACH for big invoices. Ships with a mock rail and **Lithic** (sandbox and production). Highnote, Marqeta, Amex, ACH, Stripe Issuing and x402 are [next](#-roadmap). |
-| 🏠 **Self-hosted, Apache 2.0** | Runs on your laptop or in your VPC. Your card credentials never leave your infrastructure. |
+| 📼 **A black box recorder for every decision** | Goal, alternatives, the agent's reasoning, every rule and how it ruled, who approved, and what was executed, as append-only JSON lines. Card numbers are never written to disk. |
+| 🔀 **One policy, routed per provider** | `routes` in `policies.yaml` picks the provider per purchase by amount, vendor or recurrence, so the same rules apply wherever the money moves. |
+| 🏠 **Self-hosted, Apache 2.0** | Runs on your laptop or in your VPC. Your financial credentials never leave your infrastructure. |
 
 ## 🤝 Use it with your rail, not instead of it
 
-PurseString doesn't replace your card issuer. It's the policy layer on top, and the same policy works whichever rail moves the money.
+PurseString doesn't replace your card issuer or bank. It's the interface and policy layer on top, so the same rules apply whichever provider moves the money.
 
 | | Card issuer controls<br><sub>(Ramp, Stripe Issuing, Lithic)</sub> | **PurseString on top** |
 |---|:---:|:---:|
@@ -163,11 +175,9 @@ Deep dive: **[docs/how-it-works.md](docs/how-it-works.md)**. Policy reference: *
 - [x] Mock rail, Lithic virtual cards, Docker image
 - [x] Just-in-time authorization (Lithic ASA), cards that close after 10 minutes
 - [x] Policy-based rail routing
-- [ ] Highnote and Marqeta adapters
-- [ ] Amex corporate virtual cards
-- [ ] ACH / wire bank transfers
-- [ ] Stripe Issuing test-mode adapter
-- [ ] x402 / USDC adapter
+- [ ] **Connect more providers:** Highnote ([#13](https://github.com/suseendar1414/pursestring/issues/13)), Marqeta ([#14](https://github.com/suseendar1414/pursestring/issues/14)), Amex corporate cards ([#15](https://github.com/suseendar1414/pursestring/issues/15)), Stripe Issuing ([#1](https://github.com/suseendar1414/pursestring/issues/1)), x402 / USDC ([#2](https://github.com/suseendar1414/pursestring/issues/2))
+- [ ] **Existing bank accounts:** ACH / wire transfers from the company's own account, with reconciliation of uncertain transfer states ([#16](https://github.com/suseendar1414/pursestring/issues/16))
+- [ ] **More countries:** SEPA and local rails, contributed as adapters
 - [ ] One-click Slack approve/deny buttons
 - [ ] Per-agent and per-team policies
 - [ ] Audit log viewer
