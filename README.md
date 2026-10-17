@@ -16,6 +16,7 @@
 </p>
 
 <p align="center">
+  <a href="docs/try-it.md">Try it</a> ·
   <a href="#-quickstart">Quickstart</a> ·
   <a href="docs/deploy.md">Deploy</a> ·
   <a href="docs/policies.md">Policies</a> ·
@@ -81,6 +82,8 @@ PurseString doesn't replace your card issuer or bank. It's the interface and pol
 | Open source, self-hosted | | ✅ |
 
 ## 🚀 Quickstart
+
+> **New here?** [Try it in 10 minutes](docs/try-it.md) with Claude Desktop and test cards: an auto-approved purchase, a blocked double charge, and a subscription that waits for your approval.
 
 **1. Add it to your MCP client.** Claude Desktop (`claude_desktop_config.json`), Cursor (`.cursor/mcp.json`) and most others use the same shape:
 
