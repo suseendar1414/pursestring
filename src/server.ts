@@ -148,7 +148,12 @@ export function createMcpServer(gov: Governance): McpServer {
             expires_at: card.expires_at,
             rail: card.adapter,
           },
-          use_only_at: record.intent.vendor_domain,
+          intended_vendor: record.intent.vendor_domain,
+          vendor_enforcement: gov.config.policy.jit.require_merchant_match
+            ? "Charges from other merchants are declined by real-time authorization."
+            : card.single_use
+              ? "Not locked to this vendor: the card is capped at the amount and works once. Use it only here."
+              : "Locked to the first merchant that charges it, where the rail supports merchant locking.",
         });
       } catch (err) {
         return fail(err);
