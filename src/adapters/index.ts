@@ -2,6 +2,7 @@ import type { Config, RailName } from "../config.js";
 import { LithicAdapter } from "./lithic.js";
 import { MockAdapter } from "./mock.js";
 import { planned } from "./planned.js";
+import { PrivacyAdapter } from "./privacy.js";
 import type { CardAdapter } from "./types.js";
 
 export type { CardAdapter, IssueCardRequest } from "./types.js";
@@ -36,9 +37,13 @@ export class Rails {
       case "lithic":
         if (!this.config.env.lithicApiKey) throw new Error("A purchase was routed to 'lithic' but LITHIC_API_KEY is not set.");
         return new LithicAdapter(this.config.env.lithicApiKey, this.config.policy.adapter.lithic.environment);
+      case "privacy":
+        if (!this.config.env.privacyApiKey) throw new Error("A purchase was routed to 'privacy' but PRIVACY_API_KEY is not set.");
+        return new PrivacyAdapter(this.config.env.privacyApiKey);
       case "highnote":
       case "marqeta":
       case "amex":
+      case "network_token":
       case "ach":
         return planned[name]();
       default:
