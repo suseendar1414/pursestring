@@ -37,7 +37,7 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
 **PurseString** is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives agents one interface to financial services and enforces your spending rules before anything is executed. The agent declares *what* it wants to pay for, *why*, and *what it tried first*. PurseString checks that against your `policies.yaml`, blocks duplicates, pauses risky spend for a human in Slack or Discord, records the decision, and only then executes it on the right provider.
 
 > [!WARNING]
-> **v0.1 alpha.** PurseString works end to end with test cards and the Lithic sandbox, but it hasn't been battle-tested with real money yet. Use sandbox keys, and tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
+> **v0.1 alpha.** PurseString works end to end with test cards and the Lithic sandbox, but it hasn't been battle-tested with real money yet. Verified on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Use sandbox keys, and tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
 
 > [!NOTE]
 > 🎬 **Demo GIF coming soon:** an agent retries a hung checkout and PurseString returns the same card instead of charging twice.

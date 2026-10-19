@@ -197,8 +197,8 @@ Card numbers come back to the agent in the tool result and are never written to 
 
 With Auth Stream Access, Lithic asks PurseString to approve every charge on its cards as it happens, so a card can only be used for the purchase it was approved for.
 
-1. Run PurseString in HTTP mode somewhere Lithic can reach over HTTPS (the Docker image behind your reverse proxy).
-2. Enroll your endpoint `https://<your-host>/jit/lithic` for ASA in Lithic (dashboard or the ASA enrollment API).
+1. Run PurseString in HTTP mode somewhere Lithic can reach over HTTPS (the Docker image behind your reverse proxy). To try it from a laptop, a Cloudflare quick tunnel works: see **[real-time-approval.md](real-time-approval.md)**.
+2. Enroll your endpoint `https://<your-host>/jit/lithic` with `POST /v1/responder_endpoints` and `{"type":"AUTH_STREAM_ACCESS","url":"..."}`.
 3. Fetch your ASA HMAC secret from Lithic's "retrieve ASA HMAC secret" endpoint and set it as `LITHIC_WEBHOOK_SECRET`. Requests without a valid signature get `401`, and the endpoint stays off (`503`) until the secret is set.
 4. Use Lithic's sandbox transaction simulator to send an authorization and watch `pursestring log` for a `jit_authorization` entry.
 

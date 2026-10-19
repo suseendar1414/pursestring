@@ -104,6 +104,8 @@ npx -y github:suseendar1414/pursestring simulate-charge <intent_id> 12    # APPR
 npx -y github:suseendar1414/pursestring simulate-charge <intent_id> 12    # DECLINED: already used
 ```
 
+**Real-time approval on Lithic.** With a Lithic sandbox key, Lithic can ask PurseString to approve each charge as it happens. [real-time-approval.md](real-time-approval.md) sets this up from your laptop with a free Cloudflare tunnel.
+
 **Change the rules.** Edit `~/.pursestring/policies.yaml` (for example, add a vendor to `allowlist`) and restart Claude Desktop. See [policies.md](policies.md).
 
 ## If something doesn't work
