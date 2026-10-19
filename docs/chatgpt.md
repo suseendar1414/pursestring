@@ -24,7 +24,7 @@ Copy the address it prints, like `https://random-words.trycloudflare.com`, and l
 export PURSESTRING_PUBLIC_URL=https://random-words.trycloudflare.com
 export PURSESTRING_ADMIN_TOKEN=$(openssl rand -hex 24)
 echo "Your admin token: $PURSESTRING_ADMIN_TOKEN"    # you'll paste this once, in step 4
-export LITHIC_API_KEY=your-sandbox-key               # optional; without it you get test cards
+export LITHIC_API_KEY=your-lithic-key                # optional; without it you get test cards
 npx -y github:suseendar1414/pursestring serve --http
 ```
 

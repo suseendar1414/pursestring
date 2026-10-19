@@ -192,7 +192,7 @@ ChatGPT's developer mode and claude.ai custom connectors sign in with OAuth inst
 
 ## Lithic virtual cards
 
-1. Sign up at <https://lithic.com> and copy your **sandbox** API key.
+1. Sign up at <https://lithic.com> and copy an API key: sandbox for testing, production for live cards.
 2. Set `LITHIC_API_KEY`. PurseString switches from the mock rail to Lithic automatically and uses the sandbox unless your policy says `adapter.lithic.environment: production`.
 3. One-time spends get a `SINGLE_USE` card capped at the approved amount for one transaction. Approved recurring spends get a `MERCHANT_LOCKED` card with a monthly cap.
 

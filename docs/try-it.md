@@ -10,7 +10,7 @@ This walks you through testing PurseString with Claude, using test cards. No mon
 | **Claude Desktop** or **Claude Code** | Yes | The AI agent that will try to buy things. |
 | A terminal | Yes | To approve purchases and read the log. |
 | A Slack incoming webhook | Optional | To see approval requests arrive in Slack. Without it, they're printed in the server log and you approve from the terminal. |
-| A Lithic sandbox API key | Optional | Real sandbox Visa cards instead of test numbers. Not needed for this guide. |
+| A Lithic API key | Optional | Real Lithic Visa cards (sandbox or live) instead of test numbers. Not needed for this guide. |
 
 ## 1. Create a policy
 
