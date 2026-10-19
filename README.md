@@ -39,9 +39,10 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
 > [!WARNING]
 > **v0.1 alpha.** PurseString works end to end with test cards and the Lithic sandbox, but it hasn't been battle-tested with real money yet. Verified on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Use sandbox keys, and tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
 
-> [!NOTE]
-> 🎬 **Demo GIF coming soon:** an agent retries a hung checkout and PurseString returns the same card instead of charging twice.
-<!-- Replace the note above with: <p align="center"><img src="assets/demo.gif" width="720"></p> -->
+<p align="center">
+  <img src="assets/demo.gif" width="720" alt="Claude buys $12 of OCR credits through PurseString and gets a single-use card ending in 1084. After a hung checkout it retries the same purchase, and PurseString returns the same intent and the same card instead of creating a second purchase.">
+  <br><sub>A checkout hangs, the agent retries, and PurseString hands back the same card. Replay of a real Claude Desktop run on the Lithic sandbox.</sub>
+</p>
 
 ## 🧩 What it does, and what works today
 
