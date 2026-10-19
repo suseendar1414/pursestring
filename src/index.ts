@@ -9,6 +9,7 @@ import { loadConfig } from "./config.js";
 import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
 import { WebhookNotifier } from "./notify.js";
+import { revokeAllOAuth } from "./oauth.js";
 import { createMcpServer, VERSION } from "./server.js";
 import { Store } from "./store.js";
 
@@ -27,6 +28,7 @@ Usage:
                                 Pretend the merchant charged the intent's card and show the
                                 real-time authorization decision (works with the mock rail)
   pursestring policy               Print the active policy and where it was loaded from
+  pursestring oauth revoke         Sign out every app connected with OAuth (ChatGPT, claude.ai)
 
 Environment:
   PURSESTRING_HOME        State + decision log directory (default ~/.pursestring)
@@ -36,7 +38,8 @@ Environment:
   LITHIC_API_KEY       Use Lithic virtual cards (sandbox by default) instead of the mock rail
   LITHIC_WEBHOOK_SECRET  Lithic ASA HMAC key; enables real-time authorization at POST /jit/lithic
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
-  PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API
+  PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API, and the password on the OAuth consent page
+  PURSESTRING_PUBLIC_URL  Public https address of this server; turns on OAuth sign-in for ChatGPT and claude.ai
 `;
 
 function build() {
@@ -138,6 +141,13 @@ async function main() {
       const { config } = build();
       console.log(`# loaded from: ${config.policyPath ?? "built-in defaults"}  (rail: ${config.policy.adapter.type})`);
       console.log(JSON.stringify(config.policy, null, 2));
+      return;
+    }
+    case "oauth": {
+      if (arg !== "revoke") throw new Error("usage: pursestring oauth revoke");
+      const { config } = build();
+      const n = revokeAllOAuth(config.homeDir);
+      console.log(`Signed out ${n} connected app${n === 1 ? "" : "s"}. They'll need to sign in again.`);
       return;
     }
     default:

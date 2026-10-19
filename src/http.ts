@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Governance, GovernanceError, type AuthorizationCode } from "./governance.js";
+import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
 import { createMcpServer, VERSION } from "./server.js";
 
@@ -45,9 +46,13 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
 
+function bearerOf(req: IncomingMessage): string {
+  return (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+}
+
 function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
   if (!token) return false;
-  const got = Buffer.from((req.headers.authorization ?? "").replace(/^Bearer\s+/i, ""));
+  const got = Buffer.from(bearerOf(req));
   const want = Buffer.from(token);
   return got.length === want.length && timingSafeEqual(got, want);
 }
@@ -60,19 +65,42 @@ function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
  *   POST /intents/:id/approve|deny     human decision             (admin token)
  *   POST /jit/lithic                   Lithic Auth Stream Access   (LITHIC_WEBHOOK_SECRET signature)
  *   POST /jit/authorize                generic real-time authorization for other rails (admin token)
+ *   /.well-known/*, /oauth/*           OAuth sign-in for remote MCP clients (when PURSESTRING_PUBLIC_URL is set)
  * Set PURSESTRING_TOKEN to require a bearer token on /mcp, and PURSESTRING_ADMIN_TOKEN for the approval API.
+ * Set PURSESTRING_PUBLIC_URL (the public https address) to let OAuth clients such as ChatGPT sign in; /mcp then
+ * always requires a token, either PURSESTRING_TOKEN or an OAuth access token.
  */
-export function startHttp(gov: Governance, port: number, host: string, opts: { quiet?: boolean } = {}) {
+export function startHttp(
+  gov: Governance,
+  port: number,
+  host: string,
+  opts: { quiet?: boolean; publicUrl?: string } = {},
+) {
   const mcpToken = process.env.PURSESTRING_TOKEN;
   const adminToken = process.env.PURSESTRING_ADMIN_TOKEN;
+  const publicUrl = opts.publicUrl ?? process.env.PURSESTRING_PUBLIC_URL;
+  let oauth: OAuthServer | undefined;
+  if (publicUrl) {
+    if (!/^https:\/\//.test(publicUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(publicUrl)) {
+      throw new Error("PURSESTRING_PUBLIC_URL must be an https address, for example https://pursestring.example.com");
+    }
+    if (!adminToken) throw new Error("OAuth sign-in needs PURSESTRING_ADMIN_TOKEN: it's the password on the consent page.");
+    oauth = new OAuthServer(publicUrl, adminToken, gov.config.homeDir);
+  }
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
       if (url.pathname === "/healthz") return send(res, 200, { ok: true, version: VERSION, rail: gov.rails.default });
 
+      if (oauth && (await oauth.handle(req, res, url))) return;
+
       if (url.pathname === "/mcp") {
-        if (mcpToken && !bearerOk(req, mcpToken)) return send(res, 401, { error: "unauthorized" });
+        const authed = bearerOk(req, mcpToken) || (oauth?.verifyAccessToken(bearerOf(req)) ?? false);
+        if ((mcpToken || oauth) && !authed) {
+          res.writeHead(401, { "Content-Type": "application/json", ...(oauth ? { "WWW-Authenticate": oauth.challenge } : {}) });
+          return void res.end(JSON.stringify({ error: "unauthorized" }));
+        }
         if (req.method !== "POST") return send(res, 405, { error: "method not allowed; stateless server accepts POST only" });
         const body = await readJson(req);
         const mcp = createMcpServer(gov);
@@ -138,7 +166,8 @@ export function startHttp(gov: Governance, port: number, host: string, opts: { q
   server.listen(port, host, () => {
     if (opts.quiet) return;
     console.error(`[pursestring] HTTP MCP server on http://${host}:${port}/mcp (rail: ${gov.rails.default})`);
-    if (!mcpToken) console.error("[pursestring] warning: PURSESTRING_TOKEN is not set, /mcp is unauthenticated. Keep it on a private network.");
+    if (oauth) console.error(`[pursestring] OAuth sign-in on: add ${oauth.resource} as a connector in ChatGPT or Claude`);
+    else if (!mcpToken) console.error("[pursestring] warning: PURSESTRING_TOKEN is not set, /mcp is unauthenticated. Keep it on a private network.");
   });
   return server;
 }

@@ -24,6 +24,7 @@ Both modes use the same policy file and keep their state in one directory (`PURS
 - [3. From source](#3-from-source)
 - [Slack and Discord approvals](#slack-and-discord-approvals)
 - [Approving over HTTP](#approving-over-http)
+- [ChatGPT and other OAuth clients](#chatgpt-and-other-oauth-clients)
 - [Lithic virtual cards](#lithic-virtual-cards)
 - [Environment variables](#environment-variables)
 - [Production checklist](#production-checklist)
@@ -185,6 +186,10 @@ curl -X POST -H "Authorization: Bearer $PURSESTRING_ADMIN_TOKEN" \
 
 Without `PURSESTRING_ADMIN_TOKEN` the API is disabled.
 
+## ChatGPT and other OAuth clients
+
+ChatGPT's developer mode and claude.ai custom connectors sign in with OAuth instead of sending a fixed token. Set `PURSESTRING_PUBLIC_URL` to the server's public https address (and `PURSESTRING_ADMIN_TOKEN`, which becomes the consent-page password), then add `<PURSESTRING_PUBLIC_URL>/mcp` as a connector. Step by step: **[chatgpt.md](chatgpt.md)**.
+
 ## Lithic virtual cards
 
 1. Sign up at <https://lithic.com> and copy your **sandbox** API key.
@@ -219,7 +224,8 @@ To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER` to a ra
 | `PURSESTRING_TRANSPORT` | `stdio` (`http` in Docker) | `http` runs the HTTP server without `--http` |
 | `HOST`, `PORT` | `127.0.0.1`, `8787` | HTTP bind address |
 | `PURSESTRING_TOKEN` | unset | Bearer token required on `/mcp` |
-| `PURSESTRING_ADMIN_TOKEN` | unset | Enables the approval API |
+| `PURSESTRING_ADMIN_TOKEN` | unset | Enables the approval API; also the password on the OAuth consent page |
+| `PURSESTRING_PUBLIC_URL` | unset | Public https address; turns on OAuth sign-in for ChatGPT and claude.ai. See [chatgpt.md](chatgpt.md) |
 | `SLACK_WEBHOOK_URL` | unset | Slack approval requests |
 | `DISCORD_WEBHOOK_URL` | unset | Discord approval requests |
 | `LITHIC_API_KEY` | unset | Use Lithic cards |

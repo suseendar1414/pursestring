@@ -105,6 +105,8 @@ PurseString doesn't replace your card issuer or bank. It's the interface and pol
 
 With Claude Code: `claude mcp add pursestring -- npx -y github:suseendar1414/pursestring`
 
+With ChatGPT (developer mode) or claude.ai custom connectors: run it as a server and sign in with OAuth. See **[docs/chatgpt.md](docs/chatgpt.md)**.
+
 **2. Write a policy.** Run `npx -y github:suseendar1414/pursestring init` to get a commented [`policies.yaml`](examples/policies.yaml), then edit the vendor allowlist. With no file, safe defaults apply: auto-approve under $20 on allowlisted vendors, a human above $50 or for anything recurring.
 
 **3. Ask your agent to buy something.** It calls the tools below. Out of the box it uses the **mock rail** (test card numbers, no money moves). Set `LITHIC_API_KEY` to issue real [Lithic sandbox](https://docs.lithic.com) cards.
@@ -177,6 +179,7 @@ Deep dive: **[docs/how-it-works.md](docs/how-it-works.md)**. Policy reference: *
 ## 🗺️ Roadmap
 
 - [x] MCP server (stdio + Streamable HTTP), intent schema, policy engine
+- [x] OAuth sign-in for remote clients (ChatGPT developer mode, claude.ai connectors)
 - [x] Idempotency locks, single-use cards, decision log
 - [x] Slack / Discord approval pause, CLI and HTTP approve/deny
 - [x] Mock rail, Lithic virtual cards, Docker image
