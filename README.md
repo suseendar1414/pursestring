@@ -37,7 +37,7 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
 **PurseString** is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives agents one interface to financial services and enforces your spending rules before anything is executed. The agent declares *what* it wants to pay for, *why*, and *what it tried first*. PurseString checks that against your `policies.yaml`, blocks duplicates, pauses risky spend for a human in Slack or Discord, records the decision, and only then executes it on the right provider.
 
 > [!WARNING]
-> **v0.1 alpha.** PurseString works end to end with test cards and the Lithic sandbox, but it hasn't been battle-tested with real money yet. Verified on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Use sandbox keys, and tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
+> **v0.1 alpha.** PurseString issues real Lithic cards: use a production Lithic key and set `adapter.lithic.environment: production`. It's early software, so start with low limits. Tested end to end on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
 
 <p align="center">
   <img src="assets/demo.gif" width="760" alt="Screen recording in Claude Desktop: Claude asks to use PurseString's tools, gets a $12 single-use Lithic sandbox card ending in 1084, then retries the same purchase after a hung checkout and PurseString returns the same intent and card with deduplicated: true.">
@@ -109,7 +109,7 @@ With ChatGPT (developer mode) or claude.ai custom connectors: run it as a server
 
 **2. Write a policy.** Run `npx -y github:suseendar1414/pursestring init` to get a commented [`policies.yaml`](examples/policies.yaml), then edit the vendor allowlist. With no file, safe defaults apply: auto-approve under $20 on allowlisted vendors, a human above $50 or for anything recurring.
 
-**3. Ask your agent to buy something.** It calls the tools below. Out of the box it uses the **mock rail** (test card numbers, no money moves). Set `LITHIC_API_KEY` to issue real [Lithic sandbox](https://docs.lithic.com) cards.
+**3. Ask your agent to buy something.** It calls the tools below. Out of the box it uses the **mock rail** (test card numbers, no money moves). Set `LITHIC_API_KEY` to issue real [Lithic](https://docs.lithic.com) cards: a sandbox key for testing, or a production key plus `adapter.lithic.environment: production` for live cards.
 
 Prefer Docker? `docker compose up -d` gives you the server over HTTP at `http://localhost:8787/mcp`. See **[docs/deploy.md](docs/deploy.md)**.
 
