@@ -2,6 +2,9 @@
 
 ChatGPT connects to MCP servers through **developer mode**, which is available on Plus, Pro, Business, Enterprise and Education plans on the web. ChatGPT can't start a program on your computer, so PurseString runs as a web server at a public HTTPS address, and ChatGPT signs in to it with OAuth. Only someone who knows your admin token can approve that sign-in.
 
+> [!NOTE]
+> OAuth sign-in is tested with the official MCP SDK client but not yet end to end inside ChatGPT. If a step doesn't match what you see, please [open an issue](https://github.com/suseendar1414/pursestring/issues/new/choose).
+
 The same setup works for any remote MCP client that signs in with OAuth, such as custom connectors on claude.ai.
 
 You need three terminal windows. Commands are for macOS/Linux; on Windows PowerShell write `$env:NAME="value"` instead of `export NAME=value`.
