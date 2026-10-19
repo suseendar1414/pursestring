@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 
-export const RAILS = ["mock", "lithic", "highnote", "marqeta", "amex", "ach"] as const;
+export const RAILS = ["mock", "lithic", "privacy", "highnote", "marqeta", "amex", "network_token", "ach"] as const;
 const RailName = z.enum(RAILS);
 export type RailName = z.infer<typeof RailName>;
 
@@ -116,6 +116,7 @@ export interface Config {
   homeDir: string;
   env: {
     lithicApiKey?: string;
+    privacyApiKey?: string;
     /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
     lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
@@ -158,6 +159,7 @@ export function loadConfig(): Config {
   const env = {
     lithicApiKey: process.env.LITHIC_API_KEY || undefined,
     lithicWebhookSecret: process.env.LITHIC_WEBHOOK_SECRET || undefined,
+    privacyApiKey: process.env.PRIVACY_API_KEY || undefined,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,
   };

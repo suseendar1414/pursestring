@@ -35,6 +35,13 @@ export const planned = {
   marqeta: () => new PlannedAdapter("marqeta", "card", "Marqeta JIT-funded virtual cards", `${REPO}/issues/14`),
   amex: () =>
     new PlannedAdapter("amex", "card", "American Express single-use virtual card numbers on a corporate credit line", `${REPO}/issues/15`),
+  network_token: () =>
+    new PlannedAdapter(
+      "network_token",
+      "card",
+      "the user's own Visa / Mastercard via Visa Intelligent Commerce and Mastercard Agent Pay",
+      `${REPO}/issues/20`,
+    ),
   ach: () =>
     new PlannedAdapter("ach", "bank_transfer", "ACH / wire / SEPA from a corporate bank account via treasury APIs", `${REPO}/issues/16`),
 };

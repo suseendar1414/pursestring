@@ -37,9 +37,11 @@ At submit time, policy picks the rail for the purchase from `routes` in `policie
 |---|---|---|
 | `mock` | card | ✅ test cards, no network |
 | `lithic` | card | ✅ sandbox and production, JIT authorization via ASA |
+| `privacy` | card | ✅ Privacy.com cards funded from the user's own bank account (production only, no real-time authorization) |
 | `highnote` | card | planned (commercial charge cards) |
 | `marqeta` | card | planned (JIT funding) |
 | `amex` | card | planned (Amex single-use virtual numbers on a corporate line) |
+| `network_token` | card | planned (the user's own Visa / Mastercard via Visa Intelligent Commerce and Mastercard Agent Pay, [#20](https://github.com/suseendar1414/pursestring/issues/20)) |
 | `ach` | bank transfer | planned (ACH / wire / SEPA via treasury APIs) |
 
 A planned rail can already be named in `routes`; a purchase routed to it stops with an error that links to its issue, instead of silently falling back to another rail.

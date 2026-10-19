@@ -64,7 +64,7 @@ notifications:
   discord_webhook_url:            # or DISCORD_WEBHOOK_URL
 
 adapter:
-  type: mock                      # default rail: mock | lithic | highnote | marqeta | amex | ach
+  type: mock                      # default rail: mock | lithic | privacy | highnote | marqeta | amex | network_token | ach
   lithic:
     environment: sandbox          # sandbox | production
 
@@ -93,7 +93,9 @@ routes:
     max_amount: 500
 ```
 
-`highnote`, `marqeta`, `amex` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
+`privacy` issues [Privacy.com](https://privacy.com) cards funded from the user's own bank account or debit card; set `PRIVACY_API_KEY`. Privacy.com has no sandbox, so these are real cards, and it only takes whole-dollar limits, so a $12.40 approval gets a $13 cap. It also has no real-time authorization hook, so the `jit` checks don't apply to it.
+
+`highnote`, `marqeta`, `amex`, `network_token` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
 
 ## Vendor matching
 

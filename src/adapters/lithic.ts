@@ -20,9 +20,11 @@ interface LithicCard {
  * so the subscription can renew but can't be reused anywhere else.
  */
 export class LithicAdapter implements CardAdapter {
-  readonly name = "lithic";
+  readonly name: string = "lithic";
   readonly kind = "card" as const;
-  private readonly baseUrl: string;
+  protected baseUrl: string;
+  /** Provider name used in error messages. */
+  protected readonly label: string = "Lithic";
 
   constructor(
     private readonly apiKey: string,
@@ -38,13 +40,13 @@ export class LithicAdapter implements CardAdapter {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`Lithic ${method} ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+    if (!res.ok) throw new Error(`${this.label} ${method} ${path} failed: ${res.status} ${text.slice(0, 300)}`);
     return JSON.parse(text) as T;
   }
 
   private toDetails(card: LithicCard, req: { currency: string; single_use: boolean; spend_limit: number }): CardDetails {
     if (!card.pan || !card.cvv) {
-      throw new Error("Lithic did not return PAN/CVV. Your API key may not have PCI card-data access.");
+      throw new Error(`${this.label} did not return PAN/CVV. Your API key may not have PCI card-data access.`);
     }
     return {
       adapter: this.name,
@@ -61,10 +63,14 @@ export class LithicAdapter implements CardAdapter {
     };
   }
 
+  protected spendLimitCents(amount: number): number {
+    return Math.round(amount * 100);
+  }
+
   async issueCard(req: IssueCardRequest): Promise<CardDetails> {
     const card = await this.call<LithicCard>("POST", "/cards", {
       type: req.single_use ? "SINGLE_USE" : "MERCHANT_LOCKED",
-      spend_limit: Math.round(req.amount * 100),
+      spend_limit: this.spendLimitCents(req.amount),
       spend_limit_duration: req.single_use ? "TRANSACTION" : "MONTHLY",
       memo: req.memo.slice(0, 100),
     });

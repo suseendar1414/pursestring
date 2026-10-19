@@ -48,7 +48,7 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
 
 | | | Status |
 |---|---|---|
-| 🔌 **Connect** | Banks, payment providers and card issuers behind one MCP interface, through community-built adapters. | 🟡 **Virtual cards via [Lithic](https://lithic.com)** (sandbox and production), plus a mock rail for testing. Not yet: existing bank accounts and other providers ([see roadmap](#-roadmap)). |
+| 🔌 **Connect** | Banks, payment providers and card issuers behind one MCP interface, through community-built adapters. | 🟡 **Virtual cards via [Lithic](https://lithic.com)** (sandbox and production), [Privacy.com](https://privacy.com) cards funded from your own bank account (new, untested with a live account), plus a mock rail for testing. Not yet: your existing card directly, and other providers ([see roadmap](#-roadmap)). |
 | 🛡️ **Govern** | Budgets, vendor allow and block lists, and human approvals, defined once and enforced the same way on every provider. | ✅ **Live:** `policies.yaml`, per-agent daily budgets, Slack / Discord approval pause, per-purchase rail routing. |
 | 💳 **Execute** | Authorized payments and other supported financial operations. | 🟡 **Single-use and merchant-locked virtual cards** today. Bank transfers (ACH / wire) are on the roadmap ([#16](https://github.com/suseendar1414/pursestring/issues/16)). |
 | 🔒 **Protect** | No duplicate operations, safe handling of uncertain payment states, and a record of every decision. | ✅ **Live:** idempotency keys, safe retries after a hung checkout, real-time checks on every card charge, cards that close after 10 minutes, append-only audit log. |
@@ -185,7 +185,7 @@ Deep dive: **[docs/how-it-works.md](docs/how-it-works.md)**. Policy reference: *
 - [x] Mock rail, Lithic virtual cards, Docker image
 - [x] Just-in-time authorization (Lithic ASA), cards that close after 10 minutes
 - [x] Policy-based rail routing
-- [ ] **Connect more providers:** Highnote ([#13](https://github.com/suseendar1414/pursestring/issues/13)), Marqeta ([#14](https://github.com/suseendar1414/pursestring/issues/14)), Amex corporate cards ([#15](https://github.com/suseendar1414/pursestring/issues/15)), Stripe Issuing ([#1](https://github.com/suseendar1414/pursestring/issues/1)), x402 / USDC ([#2](https://github.com/suseendar1414/pursestring/issues/2))
+- [ ] **Connect more providers:** Highnote ([#13](https://github.com/suseendar1414/pursestring/issues/13)), Marqeta ([#14](https://github.com/suseendar1414/pursestring/issues/14)), Amex corporate cards ([#15](https://github.com/suseendar1414/pursestring/issues/15)), the user's own Visa / Mastercard via Visa Intelligent Commerce and Mastercard Agent Pay ([#20](https://github.com/suseendar1414/pursestring/issues/20)), Stripe Issuing ([#1](https://github.com/suseendar1414/pursestring/issues/1)), x402 / USDC ([#2](https://github.com/suseendar1414/pursestring/issues/2))
 - [ ] **Existing bank accounts:** ACH / wire transfers from the company's own account, with reconciliation of uncertain transfer states ([#16](https://github.com/suseendar1414/pursestring/issues/16))
 - [ ] **More countries:** SEPA and local rails, contributed as adapters
 - [ ] One-click Slack approve/deny buttons
