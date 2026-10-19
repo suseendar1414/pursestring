@@ -154,6 +154,9 @@ export function createMcpServer(gov: Governance): McpServer {
             : card.single_use
               ? "Not locked to this vendor: the card is capped at the amount and works once. Use it only here."
               : "Locked to the first merchant that charges it, where the rail supports merchant locking.",
+          card_details_location:
+            "The full card details are only in this result. PurseString has no dashboard and never stores card numbers; " +
+            "to see them again, call request_ephemeral_card with this intent_id before the card expires.",
         });
       } catch (err) {
         return fail(err);
