@@ -46,11 +46,14 @@ notifications:
   # discord_webhook_url: https://discord.com/api/webhooks/...
 
 adapter:
-  # The default rail. mock | lithic | privacy work today; highnote | marqeta | amex | network_token | ach are planned.
+  # The default rail. mock | lithic | privacy | airwallex work today; highnote | marqeta | amex | network_token | ach are planned.
   # LITHIC_API_KEY in the env switches the default to lithic automatically.
   type: mock
   lithic:
     environment: sandbox
+  airwallex:
+    environment: sandbox          # sandbox is Airwallex's demo environment
+    # cardholder_id: ...          # or AIRWALLEX_CARDHOLDER_ID; agent cards are issued to this cardholder
 
 # Pick a rail per purchase. First match wins; no match uses adapter.type.
 routes: []
