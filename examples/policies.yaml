@@ -39,6 +39,10 @@ idempotency:
 
 approvals:
   ttl_minutes: 1440               # pending or approved intents expire after a day
+  # `pursestring approve` needs the one-time code sent to Slack/Discord, so an agent with a shell
+  # can't approve its own purchase. Default: on whenever Slack or Discord is configured.
+  # require_code: true
+  slack_approvers: []             # Slack user IDs (U0123...) allowed to press Approve; empty = anyone in the channel
 
 notifications:
   # Or set SLACK_WEBHOOK_URL / DISCORD_WEBHOOK_URL in the environment.

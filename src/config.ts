@@ -69,8 +69,15 @@ const PolicySchema = z.object({
     .object({
       /** How long a pending or approved intent stays usable. */
       ttl_minutes: z.number().positive().default(24 * 60),
+      /**
+       * Make `pursestring approve` require the one-time code sent to Slack or Discord, so an agent with a shell
+       * can't approve its own purchase. Left unset, it's on whenever Slack or Discord is configured.
+       */
+      require_code: z.boolean().optional(),
+      /** Slack user IDs (U0123...) allowed to press Approve. Empty: anyone in the channel. */
+      slack_approvers: z.array(z.string()).default([]),
     })
-    .default({ ttl_minutes: 24 * 60 }),
+    .default({ ttl_minutes: 24 * 60, slack_approvers: [] }),
   notifications: z
     .object({
       slack_webhook_url: z.string().optional(),
@@ -120,6 +127,8 @@ export interface Config {
     /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
     lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
+    /** Slack app signing secret; turns on Approve/Deny buttons answered at POST /slack/actions. */
+    slackSigningSecret?: string;
     discordWebhookUrl?: string;
   };
 }
@@ -161,6 +170,7 @@ export function loadConfig(): Config {
     lithicWebhookSecret: process.env.LITHIC_WEBHOOK_SECRET || undefined,
     privacyApiKey: process.env.PRIVACY_API_KEY || undefined,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
+    slackSigningSecret: process.env.SLACK_SIGNING_SECRET || undefined,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,
   };
 

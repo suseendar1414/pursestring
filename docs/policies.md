@@ -58,6 +58,8 @@ idempotency:
 
 approvals:
   ttl_minutes: 1440               # pending/approved intents expire after this
+  # require_code: true            # terminal approvals need the code sent to Slack/Discord (default: on when either is set)
+  slack_approvers: []             # Slack user IDs allowed to press Approve; empty = anyone in the channel
 
 notifications:
   slack_webhook_url:              # or SLACK_WEBHOOK_URL

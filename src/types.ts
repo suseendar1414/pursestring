@@ -1,3 +1,4 @@
+import type { ApprovalChannel, ApprovalCodeHash } from "./approvals.js";
 import { z } from "zod";
 
 /** Structured intent an agent must provide before any money moves. */
@@ -52,6 +53,12 @@ export interface IntentRecord {
   approved_by?: string;
   denied_by?: string;
   decision_note?: string;
+  /** How the human decision arrived: cli, http or slack. */
+  decided_via?: ApprovalChannel;
+  /** Hash of the one-time code sent to the approver. The code itself is never stored. */
+  approval_code?: ApprovalCodeHash;
+  /** Wrong codes tried so far; too many denies the intent. */
+  approval_code_attempts?: number;
   /** The rail chosen by policy routing at submit time. */
   rail: string;
   card?: CardReference;

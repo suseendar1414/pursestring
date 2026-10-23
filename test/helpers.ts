@@ -28,12 +28,19 @@ export function intent(overrides: Partial<PurchaseIntent> = {}): PurchaseIntent 
   };
 }
 
-export function setup(policy: unknown = POLICY) {
+export function setup(policy: unknown = POLICY, env: Config["env"] = {}) {
   const dir = mkdtempSync(join(tmpdir(), "pursestring-test-"));
-  const config: Config = { policy: parsePolicy(policy), policyPath: null, homeDir: dir, env: {} };
+  const config: Config = { policy: parsePolicy(policy), policyPath: null, homeDir: dir, env };
   const store = new Store(dir);
   const pinged: IntentRecord[] = [];
-  const notifier: Notifier = { approvalRequested: async (r) => void pinged.push(r) };
+  /** Approval codes as the human's Slack or Discord would receive them. */
+  const codes: (string | undefined)[] = [];
+  const notifier: Notifier = {
+    approvalRequested: async (r, extras) => {
+      pinged.push(r);
+      codes.push(extras?.code);
+    },
+  };
   const adapter = new MockAdapter();
   let issued = 0;
   const countingAdapter = {
@@ -47,5 +54,5 @@ export function setup(policy: unknown = POLICY) {
     getCard: adapter.getCard.bind(adapter),
   };
   const gov = new Governance(config, store, new Rails(config, { mock: countingAdapter }), notifier);
-  return { gov, store, pinged, dir, adapter, issuedCount: () => issued };
+  return { gov, store, pinged, codes, dir, adapter, issuedCount: () => issued };
 }
