@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { verifySlackSignature } from "./approvals.js";
 import { Governance, GovernanceError, type AuthorizationCode } from "./governance.js";
 import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
@@ -42,6 +43,21 @@ interface LithicAsaRequest {
   merchant?: { descriptor?: string; mcc?: string };
 }
 
+interface SlackActionPayload {
+  type?: string;
+  user?: { id?: string; username?: string; name?: string };
+  actions?: { action_id?: string; value?: string }[];
+  response_url?: string;
+}
+
+/** Tell Slack what happened, replacing the buttons on success. Failures only cost the message update. */
+function slackRespond(responseUrl: string | undefined, body: Record<string, unknown>) {
+  if (!responseUrl?.startsWith("https://hooks.slack.com/")) return;
+  void fetch(responseUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(
+    (err) => console.error(`[pursestring] Slack response failed: ${err}`),
+  );
+}
+
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
@@ -64,6 +80,7 @@ function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
  *   GET  /intents?status=pending_approval   list intents          (admin token)
  *   POST /intents/:id/approve|deny     human decision             (admin token)
  *   POST /jit/lithic                   Lithic Auth Stream Access   (LITHIC_WEBHOOK_SECRET signature)
+ *   POST /slack/actions                Slack Approve/Deny buttons  (SLACK_SIGNING_SECRET signature)
  *   POST /jit/authorize                generic real-time authorization for other rails (admin token)
  *   /.well-known/*, /oauth/*           OAuth sign-in for remote MCP clients (when PURSESTRING_PUBLIC_URL is set)
  * Set PURSESTRING_TOKEN to require a bearer token on /mcp, and PURSESTRING_ADMIN_TOKEN for the approval API.
@@ -131,6 +148,41 @@ export function startHttp(
         return send(res, 200, { token: body.token, result: LITHIC_RESULT[decision.code] });
       }
 
+      if (url.pathname === "/slack/actions" && req.method === "POST") {
+        const secret = gov.config.env.slackSigningSecret;
+        if (!secret) return send(res, 503, { error: "set SLACK_SIGNING_SECRET to enable Slack buttons" });
+        const raw = await readRaw(req);
+        if (!verifySlackSignature(secret, req.headers, raw)) return send(res, 401, { error: "bad signature" });
+        const payload = JSON.parse(new URLSearchParams(raw).get("payload") ?? "{}") as SlackActionPayload;
+        const action = payload.actions?.[0];
+        const approve = action?.action_id === "pursestring_approve";
+        if (payload.type !== "block_actions" || !action?.value || (!approve && action.action_id !== "pursestring_deny")) {
+          return void res.writeHead(200).end();
+        }
+        const userId = payload.user?.id ?? "unknown";
+        const who = `slack:${payload.user?.username ?? payload.user?.name ?? userId} (${userId})`;
+        const allowed = gov.config.policy.approvals.slack_approvers;
+        res.writeHead(200).end();
+        if (allowed.length && !allowed.includes(userId)) {
+          gov.store.audit("slack_decision_refused", { intent_id: action.value, by: who, reason: "not in approvals.slack_approvers" });
+          return slackRespond(payload.response_url, {
+            response_type: "ephemeral",
+            replace_original: false,
+            text: "You're not on this server's list of Slack approvers (approvals.slack_approvers).",
+          });
+        }
+        try {
+          const rec = gov.decide(action.value, approve, who, undefined, { via: "slack" });
+          slackRespond(payload.response_url, {
+            replace_original: true,
+            text: `${approve ? ":white_check_mark: Approved" : ":no_entry: Denied"} by <@${userId}>: ${rec.intent.amount.toFixed(2)} ${rec.intent.currency} at ${rec.intent.vendor_domain} (${rec.intent_id})`,
+          });
+        } catch (err) {
+          slackRespond(payload.response_url, { response_type: "ephemeral", replace_original: false, text: (err as Error).message });
+        }
+        return;
+      }
+
       if (url.pathname === "/jit/authorize" && req.method === "POST") {
         if (!gov.config.policy.jit.enabled) return send(res, 404, { error: "jit disabled in policy" });
         if (!bearerOk(req, adminToken)) return send(res, 401, { error: "unauthorized" });
@@ -148,12 +200,13 @@ export function startHttp(
         const m = url.pathname.match(/^\/intents\/([\w-]+)\/(approve|deny)$/);
         if (m && req.method === "POST") {
           const body = ((await readJson(req)) ?? {}) as { by?: string; note?: string };
-          const rec = gov.decide(m[1], m[2] === "approve", body.by ?? "http-admin", body.note);
+          const rec = gov.decide(m[1], m[2] === "approve", body.by ?? "http-admin", body.note, { via: "http" });
           return send(res, 200, { intent_id: rec.intent_id, status: rec.status });
         }
         if (url.pathname === "/intents" && req.method === "GET") {
           const status = url.searchParams.get("status");
-          return send(res, 200, gov.store.list((r) => !status || r.status === status));
+          const rows = gov.store.list((r) => !status || r.status === status);
+          return send(res, 200, rows.map(({ approval_code: _hash, ...r }) => r));
         }
       }
       send(res, 404, { error: "not found" });
