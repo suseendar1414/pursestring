@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Questions and ideas on Discord
-    url: https://discord.gg/YOUR_INVITE
+    url: https://discord.gg/qBqgx2GB86
     about: Ask for help or talk through an idea before opening an issue.
   - name: Report a security vulnerability
     url: https://github.com/suseendar1414/pursestring/security/advisories/new
