@@ -7,7 +7,7 @@ Thanks for helping make agent spending safe. You don't need payments experience 
 1. Browse issues labelled [`good first issue`](https://github.com/suseendar1414/pursestring/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) (small, well-scoped) or [`help wanted`](https://github.com/suseendar1414/pursestring/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) (bigger).
 2. Comment **"I'd like to take this"** and we'll assign it to you. One open assignment per person at a time keeps things moving.
 3. If you have your own idea, open an issue first so we can agree on the approach before you write code.
-4. Questions are welcome in [Discord](https://discord.gg/YOUR_INVITE).
+4. Questions are welcome in [Discord](https://discord.gg/qBqgx2GB86).
 
 ## Set up in two minutes
 
