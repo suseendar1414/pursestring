@@ -1,4 +1,5 @@
 import type { Rails } from "./adapters/index.js";
+import { hashApprovalCode, newApprovalCode, verifyApprovalCode, type ApprovalChannel } from "./approvals.js";
 import type { Config } from "./config.js";
 import type { Notifier } from "./notify.js";
 import { evaluate, normalizeDomain, routeRail, vendorLabel } from "./policy.js";
@@ -28,6 +29,13 @@ export interface CardResult {
 }
 
 const ISSUING_STALE_MS = 2 * 60_000;
+const MAX_CODE_ATTEMPTS = 5;
+
+export interface DecideOptions {
+  /** Where the decision came from. Terminal approvals need the one-time code when codes are required. */
+  via: ApprovalChannel;
+  code?: string;
+}
 
 /** A real-time authorization request from a card issuer: "merchant X wants $45 on card Y. Approve?" */
 export interface AuthorizationRequest {
@@ -63,6 +71,16 @@ export class Governance {
     readonly notifier: Notifier,
   ) {}
 
+  /** Whether `pursestring approve` needs the one-time code. Unset in policy: on whenever Slack or Discord is set up. */
+  get requireCode(): boolean {
+    return this.config.policy.approvals.require_code ?? this.canSendCode;
+  }
+
+  /** Codes only go where the agent can't read them: Slack or Discord. */
+  private get canSendCode(): boolean {
+    return Boolean(this.config.env.slackWebhookUrl || this.config.env.discordWebhookUrl);
+  }
+
   private get windowMs() {
     return this.config.policy.idempotency.window_minutes * 60_000;
   }
@@ -92,6 +110,7 @@ export class Governance {
 
   async submitIntent(intent: PurchaseIntent): Promise<SubmitResult> {
     const key = idempotencyKey(intent);
+    let approvalCode: string | undefined;
     const result = this.store.transact((intents, now): SubmitResult => {
       const existing = this.findRecent(intents, key, now);
       if (existing) return { record: existing, deduplicated: true };
@@ -116,6 +135,10 @@ export class Governance {
         ...(status === "approved" ? { approved_by: "policy:auto_approve" } : {}),
         ...(status === "denied" ? { denied_by: "policy" } : {}),
       };
+      if (status === "pending_approval" && this.requireCode && this.canSendCode) {
+        approvalCode = newApprovalCode();
+        record.approval_code = hashApprovalCode(approvalCode);
+      }
       intents[record.intent_id] = record;
       return { record, deduplicated: false };
     });
@@ -146,7 +169,7 @@ export class Governance {
         status: record.status,
         policy_file: this.config.policyPath,
       });
-      if (record.status === "pending_approval") await this.notifier.approvalRequested(record);
+      if (record.status === "pending_approval") await this.notifier.approvalRequested(record, { code: approvalCode });
     }
     return result;
   }
@@ -295,23 +318,69 @@ export class Governance {
     }
   }
 
-  decide(intentId: string, approve: boolean, by: string, note?: string): IntentRecord {
-    const rec = this.store.transact((intents, now) => {
+  /**
+   * Record a human decision. A terminal approval must carry the one-time code from Slack or Discord when codes are
+   * required, because the agent may be able to run the same command. Denying never needs a code.
+   */
+  decide(intentId: string, approve: boolean, by: string, note?: string, opts: DecideOptions = { via: "cli" }): IntentRecord {
+    const out = this.store.transact((intents, now): { rec: IntentRecord; error?: GovernanceError } => {
       const r = intents[intentId];
       if (!r) throw new GovernanceError(`No intent ${intentId}.`, "not_found");
       if (r.status !== "pending_approval") {
         throw new GovernanceError(`Intent ${intentId} is ${r.status}, not pending approval.`, "not_pending");
+      }
+      if (approve && opts.via === "cli" && this.requireCode) {
+        if (!r.approval_code) {
+          throw new GovernanceError(
+            `${intentId} has no approval code, so it can't be approved from the terminal. Use the Slack button or the HTTP approval API.`,
+            "code_unavailable",
+          );
+        }
+        if (!opts.code) {
+          throw new GovernanceError(
+            `Approving from the terminal needs the one-time code from the Slack or Discord message: pursestring approve ${intentId} --code XXXXX-XXXXX`,
+            "code_required",
+          );
+        }
+        if (!verifyApprovalCode(opts.code, r.approval_code)) {
+          const attempts = (r.approval_code_attempts ?? 0) + 1;
+          r.approval_code_attempts = attempts;
+          r.updated_at = now.toISOString();
+          if (attempts >= MAX_CODE_ATTEMPTS) {
+            r.status = "denied";
+            r.denied_by = "policy:approval_code_attempts";
+            r.decision_note = `${attempts} wrong approval codes`;
+            r.approval_code = undefined;
+            return { rec: r, error: new GovernanceError(`Too many wrong approval codes: ${intentId} is now denied.`, "denied") };
+          }
+          return {
+            rec: r,
+            error: new GovernanceError(`Wrong approval code for ${intentId}. ${MAX_CODE_ATTEMPTS - attempts} tries left.`, "bad_code"),
+          };
+        }
       }
       // Hard denials stay denied: a human cannot approve past a deny rule.
       r.status = approve ? "approved" : "denied";
       if (approve) r.approved_by = by;
       else r.denied_by = by;
       r.decision_note = note;
+      r.decided_via = opts.via;
+      r.approval_code = undefined;
       r.updated_at = now.toISOString();
-      return r;
+      return { rec: r };
     });
-    this.store.audit(approve ? "human_approved" : "human_denied", { intent_id: intentId, by, note });
-    return rec;
+    if (out.error) {
+      this.store.audit("approval_code_rejected", {
+        intent_id: intentId,
+        by,
+        via: opts.via,
+        attempts: out.rec.approval_code_attempts,
+        status: out.rec.status,
+      });
+      throw out.error;
+    }
+    this.store.audit(approve ? "human_approved" : "human_denied", { intent_id: intentId, by, via: opts.via, note });
+    return out.rec;
   }
 
   /** Close single-use cards whose time is up. Runs on a timer in the server; safe to call any time. */

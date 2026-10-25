@@ -13,10 +13,10 @@ sequenceDiagram
   alt auto-approved
     S-->>A: approved
   else needs a human
-    S->>H: approval request
+    S->>H: approval request + one-time code
     S-->>A: pending_approval
     A->>S: get_intent_status(wait_seconds=300)
-    H->>S: pursestring approve int_...
+    H->>S: Slack Approve, or pursestring approve int_... --code
     S-->>A: approved
   end
   A->>S: request_ephemeral_card(intent_id)

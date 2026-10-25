@@ -147,13 +147,13 @@ What it gets back:
 }
 ```
 
-A human approves from the terminal (the Slack message includes the command), or through the [HTTP approval API](docs/deploy.md#approving-over-http):
+A human approves with the Slack **Approve** button, from the terminal, or through the [HTTP approval API](docs/deploy.md#approving-over-http). When Slack or Discord is set up, the terminal needs the one-time code from that message, so an agent with a shell can't approve its own purchase ([who can approve](docs/deploy.md#who-can-approve)):
 
 ```console
 $ npm i -g github:suseendar1414/pursestring
 $ pursestring pending
 int_19099cd4d52542c2a33f  15.00 USD  pdfocr.io (recurring)  agent=invoice-bot task=102
-$ pursestring approve int_19099cd4d52542c2a33f --note "ok for one month"
+$ pursestring approve int_19099cd4d52542c2a33f --code 7KQ2M-X9D4T --note "ok for one month"
 ```
 
 ## 🏗️ How it works
@@ -182,13 +182,13 @@ Deep dive: **[docs/how-it-works.md](docs/how-it-works.md)**. Policy reference: *
 - [x] OAuth sign-in for remote clients (ChatGPT developer mode, claude.ai connectors)
 - [x] Idempotency locks, single-use cards, decision log
 - [x] Slack / Discord approval pause, CLI and HTTP approve/deny
+- [x] One-click Slack approve/deny buttons, and one-time approval codes so agents can't approve themselves
 - [x] Mock rail, Lithic virtual cards, Docker image
 - [x] Just-in-time authorization (Lithic ASA), cards that close after 10 minutes
 - [x] Policy-based rail routing
 - [ ] **Connect more providers:** Highnote ([#13](https://github.com/suseendar1414/pursestring/issues/13)), Marqeta ([#14](https://github.com/suseendar1414/pursestring/issues/14)), Amex corporate cards ([#15](https://github.com/suseendar1414/pursestring/issues/15)), the user's own Visa / Mastercard via Visa Intelligent Commerce and Mastercard Agent Pay ([#20](https://github.com/suseendar1414/pursestring/issues/20)), Stripe Issuing ([#1](https://github.com/suseendar1414/pursestring/issues/1)), x402 / USDC ([#2](https://github.com/suseendar1414/pursestring/issues/2))
 - [ ] **Existing bank accounts:** ACH / wire transfers from the company's own account, with reconciliation of uncertain transfer states ([#16](https://github.com/suseendar1414/pursestring/issues/16))
 - [ ] **More countries:** SEPA and local rails, contributed as adapters
-- [ ] One-click Slack approve/deny buttons
 - [ ] Per-agent and per-team policies
 - [ ] Audit log viewer
 - [ ] Framework examples: LangGraph, CrewAI, Vercel AI SDK, OpenAI Agents SDK

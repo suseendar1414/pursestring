@@ -21,7 +21,9 @@ Usage:
                                 Run the MCP server over Streamable HTTP (for Docker / remote agents)
   pursestring init                 Write an example policies.yaml in the current directory
   pursestring pending              List intents waiting for a human
-  pursestring approve <intent_id> [--by name] [--note text]
+  pursestring approve <intent_id> [--code XXXXX-XXXXX] [--by name] [--note text]
+                                --code is the one-time code from the Slack or Discord message,
+                                required when approvals.require_code is on
   pursestring deny <intent_id> [--by name] [--note text]
   pursestring log [-n 20]          Show the latest decision-log entries
   pursestring simulate-charge <intent_id> <amount> [--merchant "PDFOCR.IO"]
@@ -34,6 +36,7 @@ Environment:
   PURSESTRING_HOME        State + decision log directory (default ~/.pursestring)
   PURSESTRING_POLICY      Path to policies.yaml (default ./policies.yaml, then $PURSESTRING_HOME/policies.yaml)
   SLACK_WEBHOOK_URL    Slack incoming webhook for approval requests
+  SLACK_SIGNING_SECRET Slack app signing secret; adds Approve/Deny buttons answered at POST /slack/actions
   DISCORD_WEBHOOK_URL  Discord webhook for approval requests
   LITHIC_API_KEY       Use Lithic virtual cards (sandbox by default) instead of the mock rail
   LITHIC_WEBHOOK_SECRET  Lithic ASA HMAC key; enables real-time authorization at POST /jit/lithic
@@ -68,6 +71,7 @@ async function main() {
       host: { type: "string" },
       by: { type: "string" },
       note: { type: "string" },
+      code: { type: "string" },
       merchant: { type: "string" },
       n: { type: "string", short: "n" },
       help: { type: "boolean", short: "h" },
@@ -83,6 +87,15 @@ async function main() {
     case "serve": {
       const { config, gov } = build();
       startSweeper(gov);
+      if (!gov.requireCode) {
+        console.error(
+          "[pursestring] warning: approval codes are off, so anything on this machine that can run `pursestring approve`, " +
+            "including an agent with a shell, can approve purchases. " +
+            (config.policy.approvals.require_code === false
+              ? "Remove approvals.require_code: false from policies.yaml to turn them back on."
+              : "Set SLACK_WEBHOOK_URL or DISCORD_WEBHOOK_URL to turn them on."),
+        );
+      }
       if (values.http || process.env.PURSESTRING_TRANSPORT === "http") {
         startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1");
         return;
@@ -118,7 +131,10 @@ async function main() {
     case "deny": {
       if (!arg) throw new Error(`usage: pursestring ${cmd} <intent_id>`);
       const { gov } = build();
-      const rec = gov.decide(arg, cmd === "approve", values.by ?? process.env.USER ?? "cli", values.note);
+      const rec = gov.decide(arg, cmd === "approve", values.by ?? process.env.USER ?? "cli", values.note, {
+        via: "cli",
+        code: values.code,
+      });
       console.log(`${rec.intent_id} is now ${rec.status}.`);
       return;
     }

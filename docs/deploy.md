@@ -159,13 +159,30 @@ node dist/index.js serve --http --port 8787
 
 ## Slack and Discord approvals
 
-When an intent needs a human, PurseString posts the agent, task, goal, amount, vendor, the alternatives it tried, the rules that triggered, and the exact approve/deny command.
+When an intent needs a human, PurseString posts the agent, task, goal, amount, vendor, the alternatives it tried, the rules that triggered, and the exact approve/deny command, including a one-time approval code.
 
 **Slack:** create an app at <https://api.slack.com/apps>, enable *Incoming Webhooks*, add one to your approvals channel, and set `SLACK_WEBHOOK_URL`.
 
 **Discord:** *Channel settings → Integrations → Webhooks → New Webhook*, copy the URL, set `DISCORD_WEBHOOK_URL`.
 
 You can set both. If neither is set, the request is printed to the server's stderr. Webhook failures are logged and never block the agent: the intent simply stays pending.
+
+**Slack buttons (optional):** to approve with one click instead of the terminal, run PurseString in HTTP mode at a public https address, then in your Slack app turn on *Interactivity & Shortcuts* with the request URL `https://<your server>/slack/actions`, and set `SLACK_SIGNING_SECRET` to the app's signing secret (*Basic Information → App Credentials*). The webhook must belong to that same app. Each click is checked against Slack's signature, and the approver's Slack name and ID are written to the log. To limit who can approve, list Slack user IDs in `approvals.slack_approvers`.
+
+### Who can approve
+
+The agent runs on the same machine as PurseString more often than not, and an agent with a shell could run `pursestring approve` itself. So when Slack or Discord is set up, each pending intent gets a one-time code that is sent only there:
+
+```bash
+pursestring approve int_... --code 7KQ2M-X9D4T
+```
+
+- The code is never shown to the agent, and only a scrypt hash of it is stored, so reading `state.json` doesn't give it away. Five wrong codes deny the intent.
+- Denying never needs a code. Slack buttons and the HTTP approval API don't need one either: the Slack signing secret and the admin token do the same job.
+- Every decision records how it arrived (`via: cli`, `http` or `slack`) in `decisions.jsonl` and on the intent.
+- Codes are on by default whenever Slack or Discord is configured. Set `approvals.require_code: true` or `false` to choose yourself. With codes off, the server warns at startup.
+
+Codes stop an agent that can run commands. They don't stop one that can edit files as you: it could rewrite `policies.yaml`, `state.json` or the log. For that, run PurseString as a separate OS user, or in Docker as shown above, and keep its home directory, environment and secrets out of the agent's reach.
 
 While an intent is pending, the agent is told not to buy another way and to call `get_intent_status` with `wait_seconds` (up to 300) to wait for your answer.
 

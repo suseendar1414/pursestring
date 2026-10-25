@@ -71,6 +71,8 @@ npx -y github:suseendar1414/pursestring pending
 npx -y github:suseendar1414/pursestring approve <intent_id>
 ```
 
+If you've set up Slack or Discord, add `--code` with the code from that message: it's what stops an agent approving its own purchase.
+
 Then tell Claude: *"I approved it. Check the status and get the card."* You should get a recurring card capped at $15 a month (on a real rail like Lithic it is also locked to that merchant).
 
 **D. A blocked vendor**

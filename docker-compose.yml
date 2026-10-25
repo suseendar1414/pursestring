@@ -11,6 +11,7 @@ services:
       PURSESTRING_TOKEN: ${PURSESTRING_TOKEN:-}               # bearer token agents must send to /mcp
       PURSESTRING_ADMIN_TOKEN: ${PURSESTRING_ADMIN_TOKEN:-}   # bearer token for the approve/deny API
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       LITHIC_API_KEY: ${LITHIC_API_KEY:-}               # set to use Lithic sandbox cards instead of the mock rail
       LITHIC_WEBHOOK_SECRET: ${LITHIC_WEBHOOK_SECRET:-} # Lithic ASA HMAC key: real-time authorization at /jit/lithic
