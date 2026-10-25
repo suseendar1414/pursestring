@@ -269,4 +269,4 @@ To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER` to a ra
 | `Lithic did not return PAN/CVV` | Your Lithic key lacks card-data access. Ask Lithic to enable it, or use the mock rail. |
 | `401 unauthorized` on `/mcp` | Send `Authorization: Bearer $PURSESTRING_TOKEN`. |
 
-Still stuck? Ask in [Discord](https://discord.gg/YOUR_INVITE) or [open an issue](https://github.com/suseendar1414/pursestring/issues/new/choose).
+Still stuck? Ask in [Discord](https://discord.gg/qBqgx2GB86) or [open an issue](https://github.com/suseendar1414/pursestring/issues/new/choose).
