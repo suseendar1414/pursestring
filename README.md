@@ -12,7 +12,7 @@
   <a href="https://github.com/suseendar1414/pursestring/actions/workflows/ci.yml"><img src="https://github.com/suseendar1414/pursestring/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-server-6366f1" alt="MCP server"></a>
   <a href="https://github.com/suseendar1414/pursestring/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/github/issues/suseendar1414/pursestring/good%20first%20issue?color=7057ff&label=good%20first%20issues" alt="Good first issues"></a>
-  <a href="https://discord.gg/YOUR_INVITE"><img src="https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/qBqgx2GB86"><img src="https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
   <a href="docs/policies.md">Policies</a> ·
   <a href="docs/how-it-works.md">How it works</a> ·
   <a href="docs/VISION.md">Vision</a> ·
-  <a href="https://discord.gg/YOUR_INVITE">Discord</a> ·
+  <a href="https://discord.gg/qBqgx2GB86">Discord</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
@@ -210,7 +210,7 @@ The full product vision is in **[docs/VISION.md](docs/VISION.md)**.
 
 ## 💬 Community
 
-- **[Discord](https://discord.gg/YOUR_INVITE)**: questions, ideas, show what you built
+- **[Discord](https://discord.gg/qBqgx2GB86)**: questions, ideas, show what you built
 - **[Issues](https://github.com/suseendar1414/pursestring/issues)**: bugs and feature requests
 - **[Contributing guide](CONTRIBUTING.md)**: set up in two minutes, add a rail in an afternoon
 
