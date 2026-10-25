@@ -38,6 +38,8 @@ Environment:
   LITHIC_API_KEY       Use Lithic virtual cards (sandbox by default) instead of the mock rail
   LITHIC_WEBHOOK_SECRET  Lithic ASA HMAC key; enables real-time authorization at POST /jit/lithic
   PRIVACY_API_KEY      Enables the privacy rail (Privacy.com cards, real money, route to it in policies.yaml)
+  AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY, AIRWALLEX_CARDHOLDER_ID
+                       Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
   PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API, and the password on the OAuth consent page
   PURSESTRING_PUBLIC_URL  Public https address of this server; turns on OAuth sign-in for ChatGPT and claude.ai

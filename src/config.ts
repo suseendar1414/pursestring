@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 
-export const RAILS = ["mock", "lithic", "privacy", "highnote", "marqeta", "amex", "network_token", "ach"] as const;
+export const RAILS = ["mock", "lithic", "privacy", "airwallex", "highnote", "marqeta", "amex", "network_token", "ach"] as const;
 const RailName = z.enum(RAILS);
 export type RailName = z.infer<typeof RailName>;
 
@@ -86,8 +86,16 @@ const PolicySchema = z.object({
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
         })
         .default({ environment: "sandbox" }),
+      airwallex: z
+        .object({
+          /** "sandbox" is Airwallex's demo environment. */
+          environment: z.enum(["sandbox", "production"]).default("sandbox"),
+          /** The cardholder agent cards are issued to; or AIRWALLEX_CARDHOLDER_ID. */
+          cardholder_id: z.string().optional(),
+        })
+        .default({ environment: "sandbox" }),
     })
-    .default({ type: "mock", lithic: { environment: "sandbox" } }),
+    .default({ type: "mock", lithic: { environment: "sandbox" }, airwallex: { environment: "sandbox" } }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z
@@ -117,6 +125,9 @@ export interface Config {
   env: {
     lithicApiKey?: string;
     privacyApiKey?: string;
+    airwallexClientId?: string;
+    airwallexApiKey?: string;
+    airwallexCardholderId?: string;
     /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
     lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
@@ -160,6 +171,9 @@ export function loadConfig(): Config {
     lithicApiKey: process.env.LITHIC_API_KEY || undefined,
     lithicWebhookSecret: process.env.LITHIC_WEBHOOK_SECRET || undefined,
     privacyApiKey: process.env.PRIVACY_API_KEY || undefined,
+    airwallexClientId: process.env.AIRWALLEX_CLIENT_ID || undefined,
+    airwallexApiKey: process.env.AIRWALLEX_API_KEY || undefined,
+    airwallexCardholderId: process.env.AIRWALLEX_CARDHOLDER_ID || policy.adapter.airwallex.cardholder_id,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,
   };

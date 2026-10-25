@@ -1,4 +1,5 @@
 import type { Config, RailName } from "../config.js";
+import { AirwallexAdapter } from "./airwallex.js";
 import { LithicAdapter } from "./lithic.js";
 import { MockAdapter } from "./mock.js";
 import { planned } from "./planned.js";
@@ -40,6 +41,15 @@ export class Rails {
       case "privacy":
         if (!this.config.env.privacyApiKey) throw new Error("A purchase was routed to 'privacy' but PRIVACY_API_KEY is not set.");
         return new PrivacyAdapter(this.config.env.privacyApiKey);
+      case "airwallex": {
+        const { airwallexClientId: clientId, airwallexApiKey: apiKey, airwallexCardholderId: cardholderId } = this.config.env;
+        if (!clientId || !apiKey || !cardholderId) {
+          throw new Error(
+            "A purchase was routed to 'airwallex' but AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY and AIRWALLEX_CARDHOLDER_ID are not all set.",
+          );
+        }
+        return new AirwallexAdapter({ clientId, apiKey, cardholderId, environment: this.config.policy.adapter.airwallex.environment });
+      }
       case "highnote":
       case "marqeta":
       case "amex":

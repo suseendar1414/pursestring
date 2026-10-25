@@ -38,6 +38,7 @@ At submit time, policy picks the rail for the purchase from `routes` in `policie
 | `mock` | card | ✅ test cards, no network |
 | `lithic` | card | ✅ sandbox and production, JIT authorization via ASA |
 | `privacy` | card | ✅ Privacy.com cards funded from the user's own bank account (production only, no real-time authorization) |
+| `airwallex` | card | ✅ Airwallex Issuing cards in 50+ countries, demo and production (no real-time authorization yet; not yet tested against a live account) |
 | `highnote` | card | planned (commercial charge cards) |
 | `marqeta` | card | planned (JIT funding) |
 | `amex` | card | planned (Amex single-use virtual numbers on a corporate line) |
