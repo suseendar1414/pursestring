@@ -24,16 +24,33 @@ test("approves a charge that matches the intent, then refuses a second use", asy
 
 test("declines over the approved amount, honouring the tolerance", async () => {
   const strict = await issued();
-  assert.equal(strict.gov.authorize({ card_token: strict.card.token, amount: 15.5, merchant: "x" }).code, "over_amount");
+  assert.equal(strict.gov.authorize({ card_token: strict.card.token, amount: 15.5, merchant: "PDFOCR.IO" }).code, "over_amount");
   const lenient = await issued({ ...POLICY, jit: { tolerance_percent: 5 } });
-  assert.equal(lenient.gov.authorize({ card_token: lenient.card.token, amount: 15.5, merchant: "x" }).code, "approved");
+  assert.equal(lenient.gov.authorize({ card_token: lenient.card.token, amount: 15.5, merchant: "PDFOCR.IO" }).code, "approved");
 });
 
-test("declines unknown cards and, when required, the wrong merchant", async () => {
-  const { gov, card } = await issued({ ...POLICY, jit: { require_merchant_match: true } });
+test("declines unknown cards and, by default, the wrong merchant or a missing descriptor", async () => {
+  const { gov, card } = await issued();
   assert.equal(gov.authorize({ card_token: "nope", amount: 1, merchant: "x" }).code, "unknown_card");
   assert.equal(gov.authorize({ card_token: card.token, amount: 15, merchant: "SKETCHY SHOP LLC" }).code, "merchant_mismatch");
+  assert.equal(gov.authorize({ card_token: card.token, amount: 15, merchant: "" }).code, "merchant_mismatch");
   assert.equal(gov.authorize({ card_token: card.token, amount: 15, merchant: "PDFOCR.IO SAN FRANCISCO" }).code, "approved");
+});
+
+test("merchant matching can be turned off in policy", async () => {
+  const { gov, card } = await issued({ ...POLICY, jit: { require_merchant_match: false } });
+  assert.equal(gov.authorize({ card_token: card.token, amount: 15, merchant: "SKETCHY SHOP LLC" }).code, "approved");
+});
+
+test("a subscription card is pinned to the merchant that first charged it", async () => {
+  const { gov, card } = await issued(POLICY, { is_recurring: true, amount: 15 });
+  const charge = (merchant_id?: string, mcc?: string) =>
+    gov.authorize({ card_token: card.token, amount: 1, merchant: "PDFOCR.IO", merchant_id, mcc }).code;
+  assert.equal(charge("acc_1", "5734"), "approved");
+  assert.equal(charge("acc_2", "5734"), "merchant_mismatch", "look-alike descriptor, different merchant");
+  assert.equal(charge(undefined, "5734"), "merchant_mismatch", "merchant ID missing after it was pinned");
+  assert.equal(charge("acc_1", "7995"), "merchant_mismatch", "same merchant, different category");
+  assert.equal(charge("acc_1", "5734"), "approved");
 });
 
 test("recurring cards are capped per month, not per charge", async () => {

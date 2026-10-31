@@ -72,7 +72,8 @@ sequenceDiagram
 | A single-use card is still inside its TTL and not closed | `CARD_PAUSED` |
 | A single-use card hasn't been charged before | `VELOCITY_EXCEEDED` |
 | The amount is within the approved amount (+ `jit.tolerance_percent`); for subscriptions, within the monthly cap | `INSUFFICIENT_FUNDS` |
-| The merchant descriptor mentions the vendor (only if `jit.require_merchant_match`) | `UNAUTHORIZED_MERCHANT` |
+| The merchant descriptor mentions the vendor (`jit.require_merchant_match`, on by default; a missing descriptor is declined) | `UNAUTHORIZED_MERCHANT` |
+| A subscription card is only charged by the merchant (ID and category) that first charged it | `UNAUTHORIZED_MERCHANT` |
 
 Decisions are local (one locked JSON read) and take a few milliseconds, well inside Lithic's 6-second limit. Requests must carry a valid [Standard Webhooks](https://www.standardwebhooks.com) signature made with your Lithic ASA HMAC key (`LITHIC_WEBHOOK_SECRET`). Other rails can call the generic `POST /jit/authorize` with the admin token. To try it locally on the mock rail: `pursestring simulate-charge <intent_id> <amount>`.
 

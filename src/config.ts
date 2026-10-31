@@ -117,10 +117,10 @@ const PolicySchema = z.object({
       enabled: z.boolean().default(true),
       /** Allow an authorization this much above the approved amount (tax, FX). */
       tolerance_percent: z.number().nonnegative().default(0),
-      /** Decline when the merchant descriptor doesn't mention the vendor's name. */
-      require_merchant_match: z.boolean().default(false),
+      /** Decline when the merchant descriptor doesn't mention the vendor's name. On by default: the card is for that vendor only. */
+      require_merchant_match: z.boolean().default(true),
     })
-    .default({ enabled: true, tolerance_percent: 0, require_merchant_match: false }),
+    .default({ enabled: true, tolerance_percent: 0, require_merchant_match: true }),
 });
 
 export type Policy = z.infer<typeof PolicySchema>;
