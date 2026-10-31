@@ -76,4 +76,4 @@ jit:
   # PurseString approves only charges that match the approved intent. Needs LITHIC_WEBHOOK_SECRET for Lithic.
   enabled: true
   tolerance_percent: 0            # allow this much over the approved amount (tax, FX)
-  require_merchant_match: false   # decline when the merchant descriptor doesn't mention the vendor
+  require_merchant_match: true    # decline when the merchant descriptor doesn't mention the vendor

@@ -81,7 +81,7 @@ cards:
 jit:
   enabled: true                   # answer the issuer's real-time authorization webhook
   tolerance_percent: 0            # allow this much over the approved amount
-  require_merchant_match: false   # decline when the descriptor doesn't mention the vendor
+  require_merchant_match: true    # decline when the descriptor doesn't mention the vendor
 ```
 
 ## Rail routing

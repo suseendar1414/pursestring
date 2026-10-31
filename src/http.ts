@@ -40,7 +40,7 @@ interface LithicAsaRequest {
   card?: { token?: string };
   amount?: number;
   merchant_amount?: number;
-  merchant?: { descriptor?: string; mcc?: string };
+  merchant?: { descriptor?: string; mcc?: string; acceptor_id?: string };
 }
 
 interface SlackActionPayload {
@@ -143,6 +143,7 @@ export function startHttp(
           card_token: body.card_token ?? body.card?.token ?? "",
           amount: cents / 100,
           merchant: body.merchant?.descriptor ?? "",
+          merchant_id: body.merchant?.acceptor_id,
           mcc: body.merchant?.mcc,
         });
         return send(res, 200, { token: body.token, result: LITHIC_RESULT[decision.code] });
@@ -186,11 +187,24 @@ export function startHttp(
       if (url.pathname === "/jit/authorize" && req.method === "POST") {
         if (!gov.config.policy.jit.enabled) return send(res, 404, { error: "jit disabled in policy" });
         if (!bearerOk(req, adminToken)) return send(res, 401, { error: "unauthorized" });
-        const body = ((await readJson(req)) ?? {}) as { card_token?: string; amount?: number; merchant?: string; mcc?: string };
+        const body = ((await readJson(req)) ?? {}) as {
+          card_token?: string;
+          amount?: number;
+          merchant?: string;
+          merchant_id?: string;
+          mcc?: string;
+        };
         if (!body.card_token || typeof body.amount !== "number") {
           return send(res, 400, { error: "card_token and amount (major units) are required" });
         }
-        return send(res, 200, gov.authorize({ card_token: body.card_token, amount: body.amount, merchant: body.merchant ?? "", mcc: body.mcc }));
+        const decision = gov.authorize({
+          card_token: body.card_token,
+          amount: body.amount,
+          merchant: body.merchant ?? "",
+          merchant_id: body.merchant_id,
+          mcc: body.mcc,
+        });
+        return send(res, 200, decision);
       }
 
       if (url.pathname.startsWith("/intents")) {

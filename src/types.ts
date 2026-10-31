@@ -70,6 +70,9 @@ export interface AuthorizationRecord {
   ts: string;
   amount: number;
   merchant: string;
+  /** The issuer's ID for the merchant (Lithic acceptor_id), when it sends one. */
+  merchant_id?: string;
+  mcc?: string;
   approved: boolean;
   reason: string;
 }

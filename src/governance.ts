@@ -42,6 +42,8 @@ export interface AuthorizationRequest {
   card_token: string;
   amount: number;
   merchant: string;
+  /** The issuer's stable ID for the merchant (Lithic acceptor_id). */
+  merchant_id?: string;
   mcc?: string;
 }
 
@@ -421,6 +423,8 @@ export class Governance {
             ts: now.toISOString(),
             amount: req.amount,
             merchant: req.merchant,
+            ...(req.merchant_id ? { merchant_id: req.merchant_id } : {}),
+            ...(req.mcc ? { mcc: req.mcc } : {}),
             approved: code === "approved",
             reason,
           };
@@ -457,11 +461,20 @@ export class Governance {
       if (jit.require_merchant_match) {
         const label = vendorLabel(rec.intent.vendor_domain);
         const descriptor = req.merchant.toLowerCase().replace(/[^a-z0-9]/g, "");
-        if (label && !descriptor.includes(label)) {
+        if (!descriptor) return decide("merchant_mismatch", "The charge has no merchant descriptor, so it can't be matched to the vendor.");
+        if (!label || !descriptor.includes(label)) {
           return decide(
             "merchant_mismatch",
             `Merchant "${req.merchant}" doesn't look like ${normalizeDomain(rec.intent.vendor_domain)}.`,
           );
+        }
+        // A subscription card is pinned to the merchant that first charged it, so a look-alike descriptor can't reuse it.
+        const first = approvedBefore[0];
+        if (first?.merchant_id && req.merchant_id !== first.merchant_id) {
+          return decide("merchant_mismatch", `Merchant ID ${req.merchant_id ?? "(none)"} isn't the ${first.merchant_id} this card was first charged by.`);
+        }
+        if (first?.mcc && req.mcc && req.mcc !== first.mcc) {
+          return decide("merchant_mismatch", `Merchant category ${req.mcc} isn't the ${first.mcc} this card was first charged under.`);
         }
       }
       return decide("approved", "Matches the approved intent.");
