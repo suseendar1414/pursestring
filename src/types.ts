@@ -64,6 +64,25 @@ export interface IntentRecord {
   card?: CardReference;
   /** Real-time authorization decisions made against this intent's card. */
   authorizations?: AuthorizationRecord[];
+  /** Merchant refunds credited back against this intent. The original charge is never edited. */
+  refunds?: RefundRecord[];
+  /** Sum of `refunds`, never more than what was charged. */
+  refunded_total?: number;
+  /** Set once any refund lands. Kept apart from `status` so a refunded subscription card keeps working. */
+  refund_status?: RefundStatus;
+}
+
+export type RefundStatus = "partially_refunded" | "refunded";
+
+export interface RefundRecord {
+  /** The issuer's ID for this refund (Lithic event token). Seen twice means it's a retry, not a second refund. */
+  refund_id: string;
+  ts: string;
+  amount: number;
+  currency: string;
+  /** Where the refund came from: "lithic" or "http". */
+  source: string;
+  merchant?: string;
 }
 
 export interface AuthorizationRecord {

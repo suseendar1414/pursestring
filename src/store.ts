@@ -138,10 +138,10 @@ export class Store {
   }
 }
 
-/** Total of card spend limits issued to an agent since 00:00 UTC. */
+/** Total of card spend limits issued to an agent since 00:00 UTC, less what merchants have refunded on those cards. */
 export function spentToday(intents: Record<string, IntentRecord>, agentId: string, now: Date): number {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   return Object.values(intents)
     .filter((r) => r.intent.agent_id === agentId && r.card && new Date(r.card.issued_at) >= dayStart)
-    .reduce((sum, r) => sum + (r.card?.spend_limit ?? 0), 0);
+    .reduce((sum, r) => sum + Math.max(0, (r.card?.spend_limit ?? 0) - (r.refunded_total ?? 0)), 0);
 }

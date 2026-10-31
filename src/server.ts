@@ -50,7 +50,17 @@ function view(rec: IntentRecord) {
     decision_note: rec.decision_note,
     expires_at: rec.expires_at,
     card_last_four: rec.card?.last_four,
-    next_step: nextStep(rec),
+    ...(rec.refund_status
+      ? {
+          refund_status: rec.refund_status,
+          refunded_total: rec.refunded_total,
+          refunds: rec.refunds?.map(({ amount, currency, ts }) => ({ amount, currency, ts })),
+        }
+      : {}),
+    next_step: rec.refund_status
+      ? `The merchant ${rec.refund_status === "refunded" ? "refunded this purchase in full" : "partly refunded this purchase"} and the budget was given back. ` +
+        "If you still need it, submit a new intent; don't reuse this one."
+      : nextStep(rec),
   };
 }
 
