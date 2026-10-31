@@ -1,4 +1,40 @@
-# PayPal and Venmo payouts
+# PayPal: payouts, and guardrails for PayPal's own MCP server
+
+PurseString works with PayPal in two ways:
+
+1. **[Governing PayPal's MCP server](#govern-paypals-mcp-server).** PurseString runs PayPal's official MCP server (`@paypal/mcp`, built on the [PayPal Agent Toolkit](https://github.com/paypal/AI-Toolkit)) behind itself. Your agent gets all of PayPal's tools through PurseString, but refunds, dispute acceptance and cancellations go through policy first.
+2. **[Paying vendors](#paypal-and-venmo-payouts).** An agent pays a vendor's PayPal or Venmo account through PayPal Payouts, which the Agent Toolkit doesn't cover.
+
+## Govern PayPal's MCP server
+
+PayPal's MCP server gives an agent about 28 tools, including `create_refund`, `accept_dispute_claim` and `cancel_subscription`. Out of the box, nothing limits how often or how much an agent can use them. A support agent that is prompt-injected by a customer email can refund any order in full.
+
+With `paypal_tools.enabled`, PurseString sits in front of those tools:
+
+```
+agent ──create_refund──▶ PurseString ──policy──▶ run now / pause for a human / refuse
+                                     └─(allowed)──▶ PayPal MCP server ──▶ PayPal API
+```
+
+- **Read-only tools pass straight through** unchanged, such as `list_transactions`, `get_order` and `list_disputes`.
+- **Refunds are ruled on by amount.** A refund under `refunds.auto_approve_under` runs at once. A larger one waits for a human in Slack, Discord or the terminal. A refund over `refunds.max_amount` is refused. A full refund with no amount always waits for a human. Refunds count toward the agent's daily budget.
+- **Some tools always need a human**, whatever the amount. The defaults are `accept_dispute_claim`, `cancel_subscription`, `cancel_sent_invoice` and `update_subscription`. Tools on `deny` never run.
+- **Each approved call runs once.** A governed tool takes two extra fields, `agent_id` and `reason`. When a call pauses, the agent waits with `get_intent_status` and then repeats the same call with the `intent_id`. An approval only covers the exact arguments it was given, so the agent can't get $80 approved and then refund $400. Repeating a call that already ran returns PayPal's first answer instead of refunding twice.
+- **Everything is in the audit log**, including what the agent wanted to do, why, which rules applied and who approved it.
+
+```yaml
+paypal_tools:
+  enabled: true
+  refunds:
+    auto_approve_under: 25
+    max_amount: 500
+  require_approval: [accept_dispute_claim, cancel_subscription, cancel_sent_invoice, update_subscription]
+  deny: []
+```
+
+PurseString starts PayPal's server with `npx -y @paypal/mcp@1.8.1 --tools=all`; change `paypal_tools.command` to pin another version or a subset of tools. It needs `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` (steps 1 and 2 below). PayPal's server only ever gets a short-lived access token, never the secret, and it is restarted when the token rotates. Point your agent at PurseString only, not at PayPal's MCP server directly, or the guardrails can be bypassed.
+
+## PayPal and Venmo payouts
 
 The `paypal` rail lets an agent pay a vendor's PayPal or Venmo account, under the same policy, approvals, budgets and audit log as every other rail.
 

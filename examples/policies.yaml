@@ -69,6 +69,16 @@ payees: []
 #    type: EMAIL                   # EMAIL | PHONE | PAYPAL_ID
 #    wallet: PAYPAL                # PAYPAL | VENMO (Venmo pays to a US phone number)
 
+# Run PayPal's own MCP server (@paypal/mcp) behind PurseString. Read-only tools pass through;
+# refunds, dispute acceptance and cancellations go through policy first. See docs/paypal.md.
+paypal_tools:
+  enabled: false                  # needs PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET
+  refunds:
+    auto_approve_under: 25        # smaller refunds run without a human
+    max_amount: 500               # bigger refunds are refused outright
+  require_approval: [accept_dispute_claim, cancel_subscription, cancel_sent_invoice, update_subscription]
+  deny: []
+
 # Pick a rail per purchase. First match wins; no match uses adapter.type.
 routes: []
 #  - rail: ach                     # big B2B invoices where cards aren't accepted

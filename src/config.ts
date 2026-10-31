@@ -129,6 +129,37 @@ const PolicySchema = z.object({
    * a vendor with no entry here can't be paid by payout.
    */
   payees: z.array(PayeeSchema).default([]),
+  /**
+   * Govern PayPal's own MCP server (@paypal/mcp): PurseString runs it behind itself and re-exposes its tools.
+   * Read-only tools pass straight through; tools that move money or can't be undone go through policy first.
+   */
+  paypal_tools: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** The upstream PayPal MCP server, started with PAYPAL_ACCESS_TOKEN set from PAYPAL_CLIENT_ID / SECRET. */
+      command: z.array(z.string()).min(1).default(["npx", "-y", "@paypal/mcp@1.8.1", "--tools=all"]),
+      refunds: z
+        .object({
+          /** Refunds strictly under this amount run without a human. */
+          auto_approve_under: z.number().nonnegative().default(25),
+          /** Refunds over this amount are refused outright, even with a human. */
+          max_amount: z.number().positive().default(500),
+        })
+        .default({ auto_approve_under: 25, max_amount: 500 }),
+      /** Tools that always wait for a human, whatever the amount. */
+      require_approval: z
+        .array(z.string())
+        .default(["accept_dispute_claim", "cancel_subscription", "cancel_sent_invoice", "update_subscription"]),
+      /** Tools the agent can never call. */
+      deny: z.array(z.string()).default([]),
+    })
+    .default({
+      enabled: false,
+      command: ["npx", "-y", "@paypal/mcp@1.8.1", "--tools=all"],
+      refunds: { auto_approve_under: 25, max_amount: 500 },
+      require_approval: ["accept_dispute_claim", "cancel_subscription", "cancel_sent_invoice", "update_subscription"],
+      deny: [],
+    }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z

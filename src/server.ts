@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Governance, GovernanceError } from "./governance.js";
+import type { Upstream } from "./paypal-mcp.js";
+import { isGovernedTool } from "./policy.js";
 import { PurchaseIntentSchema, PurchaseIntentShape, type IntentRecord } from "./types.js";
 
 export const VERSION = "0.1.0";
@@ -23,6 +25,9 @@ const fail = (err: unknown) => ({
 function nextStep(rec: IntentRecord, payout: boolean): string {
   switch (rec.status) {
     case "approved":
+      if (rec.action) {
+        return `Approved. Call ${rec.action.tool} again with exactly the same arguments and intent_id "${rec.intent_id}" to run it.`;
+      }
       return payout
         ? `Approved. Call send_payment with intent_id "${rec.intent_id}" to pay the vendor directly.`
         : `Approved. Call request_ephemeral_card with intent_id "${rec.intent_id}".`;
@@ -40,6 +45,10 @@ function nextStep(rec: IntentRecord, payout: boolean): string {
       return "The payment is being sent right now. Call send_payment again in a few seconds; it will not pay twice.";
     case "paid":
       return "Paid. The vendor has the money; do not pay again. Calling send_payment again only returns this payment.";
+    case "executing":
+      return `${rec.action?.tool ?? "The call"} is running right now. Check again in a few seconds.`;
+    case "executed":
+      return `${rec.action?.tool ?? "The call"} already ran. Do not repeat it.`;
   }
 }
 
@@ -69,7 +78,109 @@ function view(gov: Governance, rec: IntentRecord) {
   };
 }
 
-export function createMcpServer(gov: Governance): McpServer {
+/** Fields PurseString adds to every governed PayPal tool. */
+const GOVERNANCE_FIELDS = {
+  agent_id: z.string().min(1).describe("Stable identifier of the calling agent, e.g. 'support-bot'."),
+  reason: z.string().min(1).describe("Why you are doing this, e.g. 'Customer 4411 was double-charged for order 991'. Shown to the approver."),
+  intent_id: z
+    .string()
+    .optional()
+    .describe("Only when repeating a call that was paused for approval: the intent_id PurseString returned."),
+};
+
+/** PayPal's JSON Schema as zod, so the MCP SDK can list and validate it. Unreadable schemas accept any object. */
+function toZod(schema: Record<string, unknown>) {
+  try {
+    const s = z.fromJSONSchema(schema);
+    if (s instanceof z.ZodObject) return s.loose();
+  } catch {
+    /* fall through */
+  }
+  return z.object({}).loose();
+}
+
+/**
+ * Re-expose PayPal's MCP tools. Read-only tools pass straight through. Tools that move money or can't be undone
+ * (refunds, accepting disputes, cancellations) take agent_id and reason too, and run only when policy or a human
+ * allows them.
+ */
+function registerPayPalTools(server: McpServer, gov: Governance, upstream: Upstream, taken: Set<string>) {
+  for (const tool of upstream.tools) {
+    if (taken.has(tool.name)) continue;
+    const base = toZod(tool.inputSchema);
+    if (!isGovernedTool(gov.config.policy, tool.name)) {
+      server.registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: base, annotations: tool.annotations },
+        async (args: Record<string, unknown>) => {
+          try {
+            return (await upstream.call(tool.name, args)) as never;
+          } catch (err) {
+            return fail(err);
+          }
+        },
+      );
+      continue;
+    }
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description:
+          `${tool.description ?? ""}\n\nGoverned by PurseString: pass agent_id and reason. Policy may run this at once, ` +
+          "pause it for a human (then wait with get_intent_status and call again with the same arguments and the " +
+          "intent_id), or refuse it. Repeating a call that already ran returns the first result; it never runs twice.",
+        inputSchema: base.extend(GOVERNANCE_FIELDS),
+        annotations: { ...tool.annotations, destructiveHint: true, idempotentHint: true },
+      },
+      async (input: Record<string, unknown>) => {
+        const { agent_id, reason, intent_id, ...args } = input as Record<string, unknown> & {
+          agent_id: string;
+          reason: string;
+          intent_id?: string;
+        };
+        try {
+          const { record, result, replayed } = await gov.governToolCall(tool.name, args, { agent_id, reason, intent_id }, (a) =>
+            upstream.call(tool.name, a),
+          );
+          const note = {
+            type: "text" as const,
+            text: JSON.stringify({
+              pursestring: {
+                intent_id: record.intent_id,
+                approved_by: record.approved_by,
+                replayed,
+                note: replayed
+                  ? "Already ran: this is PayPal's earlier answer. Nothing was sent to PayPal again."
+                  : result.isError
+                    ? "PayPal refused the call, so nothing happened. The approval still stands if you fix the cause and retry."
+                    : "Ran once through PurseString policy.",
+              },
+            }),
+          };
+          return { ...result, content: [...(result.content as never[]), note] } as never;
+        } catch (err) {
+          if (err instanceof GovernanceError) {
+            const rec = intent_id ? gov.store.get(intent_id) : undefined;
+            const id = err.message.match(/int_[a-z0-9]+/)?.[0] ?? rec?.intent_id;
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({ error: err.code, message: err.message, intent_id: id }, null, 2),
+                },
+              ],
+            };
+          }
+          return fail(err);
+        }
+      },
+    );
+  }
+}
+
+export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer {
   const server = new McpServer(
     { name: "pursestring", version: VERSION },
     {
@@ -237,6 +348,15 @@ export function createMcpServer(gov: Governance): McpServer {
       }
     },
   );
+
+  if (upstream) {
+    registerPayPalTools(
+      server,
+      gov,
+      upstream,
+      new Set(["check_policy_compliance", "submit_purchase_intent", "request_ephemeral_card", "send_payment", "get_intent_status"]),
+    );
+  }
 
   return server;
 }

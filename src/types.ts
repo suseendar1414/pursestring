@@ -49,7 +49,11 @@ export type IntentStatus =
   /** A payout rail is sending the money. */
   | "paying"
   /** A payout rail sent the money to the vendor's account on file. */
-  | "paid";
+  | "paid"
+  /** A governed PayPal MCP tool call is running. */
+  | "executing"
+  /** A governed PayPal MCP tool call ran. */
+  | "executed";
 
 export interface IntentRecord {
   intent_id: string;
@@ -74,6 +78,8 @@ export interface IntentRecord {
   card?: CardReference;
   /** Set when a payout rail (PayPal, Venmo) paid the vendor directly instead of issuing a card. */
   payment?: PaymentRecord;
+  /** Set when this intent governs a call to one of PayPal's own MCP tools instead of a purchase. */
+  action?: ActionRecord;
   /** Real-time authorization decisions made against this intent's card. */
   authorizations?: AuthorizationRecord[];
 }
@@ -131,4 +137,17 @@ export interface PaymentRecord {
   currency: string;
   payee: Payee;
   sent_at: string;
+}
+
+/** A call to a PayPal MCP tool, held until policy or a human allows it, then run once. */
+export interface ActionRecord {
+  tool: string;
+  /** The arguments PayPal will get, exactly as approved. */
+  args: Record<string, unknown>;
+  /** SHA-256 of tool + args, so a re-call with different arguments can't ride an approval. */
+  args_hash: string;
+  executed_at?: string;
+  /** PayPal's answer, returned again if the agent repeats the call. */
+  result?: unknown;
+  is_error?: boolean;
 }

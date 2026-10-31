@@ -33,8 +33,8 @@ export class PayPalAdapter implements CardAdapter {
     this.baseUrl = opts.environment === "production" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
   }
 
-  /** OAuth client-credentials token, refreshed a minute before it expires. */
-  private async bearer(): Promise<string> {
+  /** OAuth client-credentials token, refreshed a minute before it expires. Also handed to PayPal's MCP server. */
+  async accessToken(): Promise<string> {
     if (this.token && this.token.expiresAt - 60_000 > Date.now()) return this.token.value;
     const basic = Buffer.from(`${this.opts.clientId}:${this.opts.clientSecret}`).toString("base64");
     const res = await fetch(this.baseUrl + "/v1/oauth2/token", {
@@ -51,7 +51,7 @@ export class PayPalAdapter implements CardAdapter {
 
   private async call<T>(method: string, path: string, body?: unknown, requestId?: string): Promise<T> {
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${await this.bearer()}`,
+      Authorization: `Bearer ${await this.accessToken()}`,
       "Content-Type": "application/json",
     };
     if (requestId) headers["PayPal-Request-Id"] = requestId;

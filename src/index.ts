@@ -10,6 +10,8 @@ import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
 import { WebhookNotifier } from "./notify.js";
 import { revokeAllOAuth } from "./oauth.js";
+import { PayPalAdapter } from "./adapters/paypal.js";
+import { PayPalMcpUpstream } from "./paypal-mcp.js";
 import { createMcpServer, VERSION } from "./server.js";
 import { Store } from "./store.js";
 
@@ -57,6 +59,21 @@ function build() {
   return { config, store, gov };
 }
 
+/** Start PayPal's own MCP server behind PurseString when paypal_tools.enabled is set. */
+async function startPayPalTools(config: ReturnType<typeof loadConfig>) {
+  const t = config.policy.paypal_tools;
+  if (!t.enabled) return undefined;
+  const { paypalClientId: clientId, paypalClientSecret: clientSecret } = config.env;
+  if (!clientId || !clientSecret) {
+    throw new Error("paypal_tools.enabled is set but PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are not both set.");
+  }
+  const environment = config.policy.adapter.paypal.environment;
+  const auth = new PayPalAdapter({ clientId, clientSecret, environment });
+  const upstream = await PayPalMcpUpstream.spawn(t.command, environment, () => auth.accessToken()).start();
+  console.error(`[pursestring] governing ${upstream.tools.length} PayPal MCP tools (${environment})`);
+  return upstream;
+}
+
 /** Close expired single-use cards in the background while the server runs. */
 function startSweeper(gov: Governance) {
   const tick = () => void gov.sweepExpiredCards().catch((err) => console.error(`[pursestring] card sweep failed: ${err}`));
@@ -98,11 +115,14 @@ async function main() {
               : "Set SLACK_WEBHOOK_URL or DISCORD_WEBHOOK_URL to turn them on."),
         );
       }
+      const upstream = await startPayPalTools(config);
       if (values.http || process.env.PURSESTRING_TRANSPORT === "http") {
-        startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1");
+        startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1", {
+          upstream,
+        });
         return;
       }
-      const server = createMcpServer(gov);
+      const server = createMcpServer(gov, upstream);
       await server.connect(new StdioServerTransport());
       console.error(
         `[pursestring] stdio server ready (rail: ${gov.rails.default}, policy: ${config.policyPath ?? "built-in defaults"}, home: ${config.homeDir})`,

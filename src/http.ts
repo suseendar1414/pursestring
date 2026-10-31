@@ -5,6 +5,7 @@ import { verifySlackSignature } from "./approvals.js";
 import { Governance, GovernanceError, type AuthorizationCode } from "./governance.js";
 import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
+import type { Upstream } from "./paypal-mcp.js";
 import { createMcpServer, VERSION } from "./server.js";
 
 async function readRaw(req: IncomingMessage): Promise<string> {
@@ -91,7 +92,7 @@ export function startHttp(
   gov: Governance,
   port: number,
   host: string,
-  opts: { quiet?: boolean; publicUrl?: string } = {},
+  opts: { quiet?: boolean; publicUrl?: string; upstream?: Upstream } = {},
 ) {
   const mcpToken = process.env.PURSESTRING_TOKEN;
   const adminToken = process.env.PURSESTRING_ADMIN_TOKEN;
@@ -120,7 +121,7 @@ export function startHttp(
         }
         if (req.method !== "POST") return send(res, 405, { error: "method not allowed; stateless server accepts POST only" });
         const body = await readJson(req);
-        const mcp = createMcpServer(gov);
+        const mcp = createMcpServer(gov, opts.upstream);
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
         res.on("close", () => {
           void transport.close();
