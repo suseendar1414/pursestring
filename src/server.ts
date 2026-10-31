@@ -20,10 +20,12 @@ const fail = (err: unknown) => ({
   ],
 });
 
-function nextStep(rec: IntentRecord): string {
+function nextStep(rec: IntentRecord, payout: boolean): string {
   switch (rec.status) {
     case "approved":
-      return `Approved. Call request_ephemeral_card with intent_id "${rec.intent_id}".`;
+      return payout
+        ? `Approved. Call send_payment with intent_id "${rec.intent_id}" to pay the vendor directly.`
+        : `Approved. Call request_ephemeral_card with intent_id "${rec.intent_id}".`;
     case "pending_approval":
       return `Paused for human approval. Do not buy another way. Call get_intent_status with intent_id "${rec.intent_id}" and wait_seconds to wait for a decision.`;
     case "denied":
@@ -34,10 +36,20 @@ function nextStep(rec: IntentRecord): string {
       return "A card is being issued right now. Retry request_ephemeral_card in a few seconds.";
     case "expired":
       return "This intent expired. Submit a fresh intent if the purchase is still needed.";
+    case "paying":
+      return "The payment is being sent right now. Call send_payment again in a few seconds; it will not pay twice.";
+    case "paid":
+      return "Paid. The vendor has the money; do not pay again. Calling send_payment again only returns this payment.";
   }
 }
 
-function view(rec: IntentRecord) {
+function view(gov: Governance, rec: IntentRecord) {
+  let payout = false;
+  try {
+    payout = gov.isPayout(rec);
+  } catch {
+    /* rail not configured: the card path's error explains it */
+  }
   return {
     intent_id: rec.intent_id,
     status: rec.status,
@@ -50,7 +62,10 @@ function view(rec: IntentRecord) {
     decision_note: rec.decision_note,
     expires_at: rec.expires_at,
     card_last_four: rec.card?.last_four,
-    next_step: nextStep(rec),
+    payment: rec.payment
+      ? { payment_id: rec.payment.payment_id, status: rec.payment.status, paid_to: rec.payment.payee.receiver }
+      : undefined,
+    next_step: nextStep(rec, payout),
   };
 }
 
@@ -85,7 +100,7 @@ export function createMcpServer(gov: Governance): McpServer {
           summary: evaluation.summary,
           rules: evaluation.rules,
           idempotency_key,
-          existing_intent: existing ? view(existing) : null,
+          existing_intent: existing ? view(gov, existing) : null,
         });
       } catch (err) {
         return fail(err);
@@ -108,7 +123,7 @@ export function createMcpServer(gov: Governance): McpServer {
       try {
         const intent = PurchaseIntentSchema.parse(args);
         const { record, deduplicated } = await gov.submitIntent(intent);
-        return ok({ ...view(record), deduplicated });
+        return ok({ ...view(gov, record), deduplicated });
       } catch (err) {
         return fail(err);
       }
@@ -165,6 +180,43 @@ export function createMcpServer(gov: Governance): McpServer {
   );
 
   server.registerTool(
+    "send_payment",
+    {
+      title: "Send payment",
+      description:
+        "Pay an approved intent through a payout rail (PayPal or Venmo). The approved amount goes to the vendor's " +
+        "account on file in the policy; you can't choose the recipient. Each intent is paid at most once: calling " +
+        "again returns the existing payment, so it is safe to retry.",
+      inputSchema: { intent_id: z.string().describe("The intent_id returned by submit_purchase_intent.") },
+      annotations: { idempotentHint: true },
+    },
+    async ({ intent_id }) => {
+      try {
+        const { payment, record, replayed } = await gov.sendPayment(intent_id);
+        return ok({
+          intent_id,
+          replayed,
+          note: replayed
+            ? "Duplicate prevented: this intent was already paid. No money moved."
+            : `Sent ${payment.amount.toFixed(2)} ${payment.currency} to ${record.intent.vendor_domain} via ${payment.adapter}.`,
+          payment: {
+            payment_id: payment.payment_id,
+            status: payment.status,
+            amount: payment.amount,
+            currency: payment.currency,
+            paid_to: payment.payee.receiver,
+            wallet: payment.payee.wallet,
+            rail: payment.adapter,
+            sent_at: payment.sent_at,
+          },
+        });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.registerTool(
     "get_intent_status",
     {
       title: "Get intent status",
@@ -179,7 +231,7 @@ export function createMcpServer(gov: Governance): McpServer {
     },
     async ({ intent_id, wait_seconds }) => {
       try {
-        return ok(view(await gov.getStatus(intent_id, wait_seconds)));
+        return ok(view(gov, await gov.getStatus(intent_id, wait_seconds)));
       } catch (err) {
         return fail(err);
       }

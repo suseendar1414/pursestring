@@ -43,6 +43,8 @@ Environment:
   PRIVACY_API_KEY      Enables the privacy rail (Privacy.com cards, real money, route to it in policies.yaml)
   AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY, AIRWALLEX_CARDHOLDER_ID
                        Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
+  PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET
+                       Enable the paypal rail (pays vendors' PayPal or Venmo accounts on file; sandbox by default)
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
   PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API, and the password on the OAuth consent page
   PURSESTRING_PUBLIC_URL  Public https address of this server; turns on OAuth sign-in for ChatGPT and claude.ai

@@ -21,7 +21,7 @@ async function connect() {
 test("exposes the governance tools", async () => {
   const { client } = await connect();
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ["check_policy_compliance", "get_intent_status", "request_ephemeral_card", "submit_purchase_intent"]);
+  assert.deepEqual(names, ["check_policy_compliance", "get_intent_status", "request_ephemeral_card", "send_payment", "submit_purchase_intent"]);
 });
 
 test("agent flow over MCP: check, submit, card, retry", async () => {

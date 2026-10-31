@@ -2,9 +2,17 @@ import type { Rails } from "./adapters/index.js";
 import { hashApprovalCode, newApprovalCode, verifyApprovalCode, type ApprovalChannel } from "./approvals.js";
 import type { Config } from "./config.js";
 import type { Notifier } from "./notify.js";
-import { evaluate, normalizeDomain, routeRail, vendorLabel } from "./policy.js";
+import { domainMatches, evaluate, normalizeDomain, routeRail, vendorLabel } from "./policy.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
-import type { AuthorizationRecord, CardDetails, IntentRecord, PolicyEvaluation, PurchaseIntent } from "./types.js";
+import type {
+  AuthorizationRecord,
+  CardDetails,
+  IntentRecord,
+  Payee,
+  PaymentRecord,
+  PolicyEvaluation,
+  PurchaseIntent,
+} from "./types.js";
 
 export class GovernanceError extends Error {
   constructor(
@@ -19,6 +27,13 @@ export interface SubmitResult {
   record: IntentRecord;
   /** True when an identical intent inside the idempotency window was returned instead of a new one. */
   deduplicated: boolean;
+}
+
+export interface PaymentResult {
+  payment: PaymentRecord;
+  record: IntentRecord;
+  /** True when the intent was already paid and no money moved. */
+  replayed: boolean;
 }
 
 export interface CardResult {
@@ -180,6 +195,43 @@ export class Governance {
     return this.rails.get(rec.rail ?? this.rails.default);
   }
 
+  /**
+   * The checks every way of moving money shares: the intent must be approved and live, and an auto-approval is
+   * re-checked against today's budget, since other spends may have happened since submit. Runs inside a transaction.
+   */
+  private assertSpendable(rec: IntentRecord, intents: Record<string, IntentRecord>, now: Date) {
+    const intentId = rec.intent_id;
+    if (rec.status === "pending_approval") {
+      throw new GovernanceError(
+        `Intent ${intentId} is waiting for human approval. Poll get_intent_status; do not resubmit or buy another way.`,
+        "pending_approval",
+      );
+    }
+    if (rec.status === "denied" || rec.status === "expired") {
+      throw new GovernanceError(
+        `Intent ${intentId} is ${rec.status}${rec.decision_note ? `: ${rec.decision_note}` : ""}. Do not attempt this purchase.`,
+        rec.status,
+      );
+    }
+    if (rec.approved_by === "policy:auto_approve") {
+      const fresh = evaluate(this.config.policy, rec.intent, {
+        spentTodayByAgent: spentToday(intents, rec.intent.agent_id, now),
+      });
+      if (fresh.decision !== "auto_approve") {
+        rec.evaluation = fresh;
+        rec.status = fresh.decision === "deny" ? "denied" : "pending_approval";
+        rec.approved_by = undefined;
+        rec.updated_at = now.toISOString();
+        throw new GovernanceError(`Intent ${intentId} no longer qualifies for auto-approval: ${fresh.summary}`, rec.status);
+      }
+    }
+  }
+
+  /** Whether this intent's rail pays the vendor directly instead of issuing a card. */
+  isPayout(rec: IntentRecord): boolean {
+    return this.railFor(rec).kind === "payout";
+  }
+
   async requestCard(intentId: string): Promise<CardResult> {
     const existing = this.store.get(intentId);
     if (existing && this.railFor(existing).kind === "bank_transfer") {
@@ -187,6 +239,13 @@ export class Governance {
         `Policy routes ${intentId} to the '${existing.rail}' bank-transfer rail, so there is no card to issue. ` +
           "Bank transfers aren't supported yet; ask a human to pay this one.",
         "bank_transfer_rail",
+      );
+    }
+    if (existing && this.railFor(existing).kind === "payout") {
+      throw new GovernanceError(
+        `Policy routes ${intentId} to the '${existing.rail}' rail, which pays the vendor directly instead of issuing a card. ` +
+          "Call send_payment with this intent_id.",
+        "payout_rail",
       );
     }
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "issue"; record: IntentRecord };
@@ -213,33 +272,7 @@ export class Governance {
       if (rec.status === "issuing" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
         throw new GovernanceError(`A card for ${intentId} is being issued right now. Retry in a few seconds.`, "in_progress");
       }
-      if (rec.status === "pending_approval") {
-        throw new GovernanceError(
-          `Intent ${intentId} is waiting for human approval. Poll get_intent_status; do not resubmit or buy another way.`,
-          "pending_approval",
-        );
-      }
-      if (rec.status === "denied" || rec.status === "expired") {
-        throw new GovernanceError(
-          `Intent ${intentId} is ${rec.status}${rec.decision_note ? `: ${rec.decision_note}` : ""}. Do not attempt this purchase.`,
-          rec.status,
-        );
-      }
-
-      // Auto-approvals are re-checked against today's budget, since other cards may have been issued since submit.
-      if (rec.approved_by === "policy:auto_approve") {
-        const fresh = evaluate(this.config.policy, rec.intent, {
-          spentTodayByAgent: spentToday(intents, rec.intent.agent_id, now),
-        });
-        if (fresh.decision !== "auto_approve") {
-          rec.evaluation = fresh;
-          rec.status = fresh.decision === "deny" ? "denied" : "pending_approval";
-          rec.approved_by = undefined;
-          rec.updated_at = now.toISOString();
-          throw new GovernanceError(`Intent ${intentId} no longer qualifies for auto-approval: ${fresh.summary}`, rec.status);
-        }
-      }
-
+      this.assertSpendable(rec, intents, now);
       rec.status = "issuing";
       rec.updated_at = now.toISOString();
       return { kind: "issue", record: rec };
@@ -308,6 +341,123 @@ export class Governance {
       approved_by: updated.approved_by,
     });
     return { card: { ...card, expires_at: updated.card?.expires_at }, record: updated, replayed: false };
+  }
+
+  /**
+   * Pay an approved intent through a payout rail (PayPal, Venmo). The money goes to the vendor's account from the
+   * payee directory in policies.yaml, never to an address the agent supplies. An intent is paid at most once:
+   * calling again returns the existing payment, and the rail itself is told the intent ID so a crash mid-call
+   * can't double-pay on retry either.
+   */
+  async sendPayment(intentId: string): Promise<PaymentResult> {
+    const existing = this.store.get(intentId);
+    if (!existing) throw new GovernanceError(`No intent ${intentId}. Call submit_purchase_intent first.`, "not_found");
+    const adapter = this.railFor(existing);
+    if (adapter.kind !== "payout" || !adapter.sendPayout) {
+      throw new GovernanceError(
+        `Policy routes ${intentId} to the '${existing.rail}' ${adapter.kind} rail, which doesn't pay vendors directly.` +
+          (adapter.kind === "card" ? " Call request_ephemeral_card instead." : ""),
+        "not_payout_rail",
+      );
+    }
+
+    type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; payee: Payee };
+    const claim = this.store.transact((intents, now): Claim => {
+      const rec = intents[intentId];
+      if (rec.status === "paid" && rec.payment) return { kind: "replay", record: rec };
+      if (rec.status === "paying" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
+        throw new GovernanceError(`A payment for ${intentId} is being sent right now. Retry in a few seconds.`, "in_progress");
+      }
+      // A stale "paying" means a crash mid-call. Retrying is safe: the rail dedupes on the intent ID.
+      if (rec.status !== "paying") this.assertSpendable(rec, intents, now);
+      if (rec.intent.is_recurring) {
+        throw new GovernanceError(
+          `${intentId} is recurring, and a payout is a one-off payment. Route recurring spend to a card rail in policies.yaml.`,
+          "recurring_not_supported",
+        );
+      }
+      const entry = this.config.policy.payees.find((p) => domainMatches(rec.intent.vendor_domain, p.vendor));
+      if (!entry) {
+        throw new GovernanceError(
+          `No payee on file for ${normalizeDomain(rec.intent.vendor_domain)}, so PurseString doesn't know where to send the money. ` +
+            "Ask a human to add the vendor to payees in policies.yaml. Do not pay another way.",
+          "no_payee",
+        );
+      }
+      rec.status = "paying";
+      rec.updated_at = now.toISOString();
+      return { kind: "pay", record: rec, payee: { receiver: entry.receiver, type: entry.type, wallet: entry.wallet } };
+    });
+
+    if (claim.kind === "replay") {
+      const rec = claim.record;
+      let payment = rec.payment!;
+      if (adapter.getPayout) {
+        try {
+          const latest = await adapter.getPayout(payment.payment_id);
+          if (latest.status !== payment.status) {
+            payment = this.store.transact((intents) => {
+              intents[intentId].payment!.status = latest.status;
+              return intents[intentId].payment!;
+            });
+          }
+        } catch {
+          /* status refresh is best-effort; the payment itself already happened */
+        }
+      }
+      this.store.audit("payment_replayed", {
+        intent_id: intentId,
+        payment_id: payment.payment_id,
+        note: "Intent already paid: returned the existing payment, no money moved.",
+      });
+      return { payment, record: { ...rec, payment }, replayed: true };
+    }
+
+    const rec = claim.record;
+    let sent: { payment_id: string; status: string };
+    try {
+      sent = await adapter.sendPayout({
+        intent_id: rec.intent_id,
+        amount: rec.intent.amount,
+        currency: rec.intent.currency,
+        payee: claim.payee,
+        note: `${rec.intent.task_goal} (PurseString ${rec.intent_id}, ${rec.intent.agent_id}/${rec.intent.task_id})`,
+      });
+    } catch (err) {
+      this.store.transact((intents, now) => {
+        intents[intentId].status = "approved";
+        intents[intentId].updated_at = now.toISOString();
+      });
+      this.store.audit("payment_failed", { intent_id: intentId, adapter: adapter.name, error: String(err) });
+      throw new GovernanceError(`Payment rail error: ${(err as Error).message}`, "adapter_error");
+    }
+
+    const updated = this.store.transact((intents, now) => {
+      const r = intents[intentId];
+      r.status = "paid";
+      r.updated_at = now.toISOString();
+      r.payment = {
+        adapter: adapter.name,
+        payment_id: sent.payment_id,
+        status: sent.status,
+        amount: r.intent.amount,
+        currency: r.intent.currency,
+        payee: claim.payee,
+        sent_at: now.toISOString(),
+      };
+      return r;
+    });
+    this.store.audit("payment_sent", {
+      intent_id: intentId,
+      adapter: adapter.name,
+      payment_id: sent.payment_id,
+      status: sent.status,
+      amount: rec.intent.amount,
+      currency: rec.intent.currency,
+      payee: claim.payee,
+      approved_by: updated.approved_by,
+    });
+    return { payment: updated.payment!, record: updated, replayed: false };
   }
 
   async getStatus(intentId: string, waitSeconds = 0): Promise<IntentRecord> {

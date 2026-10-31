@@ -39,7 +39,17 @@ export interface PolicyEvaluation {
   summary: string;
 }
 
-export type IntentStatus = "approved" | "pending_approval" | "denied" | "expired" | "issuing" | "card_issued";
+export type IntentStatus =
+  | "approved"
+  | "pending_approval"
+  | "denied"
+  | "expired"
+  | "issuing"
+  | "card_issued"
+  /** A payout rail is sending the money. */
+  | "paying"
+  /** A payout rail sent the money to the vendor's account on file. */
+  | "paid";
 
 export interface IntentRecord {
   intent_id: string;
@@ -62,6 +72,8 @@ export interface IntentRecord {
   /** The rail chosen by policy routing at submit time. */
   rail: string;
   card?: CardReference;
+  /** Set when a payout rail (PayPal, Venmo) paid the vendor directly instead of issuing a card. */
+  payment?: PaymentRecord;
   /** Real-time authorization decisions made against this intent's card. */
   authorizations?: AuthorizationRecord[];
 }
@@ -96,4 +108,27 @@ export interface CardDetails extends CardReference {
   cvv: string;
   exp_month: string;
   exp_year: string;
+}
+
+export type PayeeType = "EMAIL" | "PHONE" | "PAYPAL_ID";
+export type PayeeWallet = "PAYPAL" | "VENMO";
+
+/** Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent. */
+export interface Payee {
+  receiver: string;
+  type: PayeeType;
+  wallet: PayeeWallet;
+}
+
+/** What we persist about a payout. */
+export interface PaymentRecord {
+  adapter: string;
+  /** The rail's ID for the payment, e.g. a PayPal payout_batch_id. */
+  payment_id: string;
+  /** The rail's status, e.g. PENDING, PROCESSING, SUCCESS. */
+  status: string;
+  amount: number;
+  currency: string;
+  payee: Payee;
+  sent_at: string;
 }
