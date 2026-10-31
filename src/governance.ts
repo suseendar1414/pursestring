@@ -1,10 +1,18 @@
 import type { Rails } from "./adapters/index.js";
 import { hashApprovalCode, newApprovalCode, verifyApprovalCode, type ApprovalChannel } from "./approvals.js";
 import type { Config } from "./config.js";
-import type { Notifier } from "./notify.js";
+import type { Notifier, RefundNotice } from "./notify.js";
 import { evaluate, normalizeDomain, routeRail, vendorLabel } from "./policy.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
-import type { AuthorizationRecord, CardDetails, IntentRecord, PolicyEvaluation, PurchaseIntent } from "./types.js";
+import type {
+  AuthorizationRecord,
+  CardDetails,
+  IntentRecord,
+  PolicyEvaluation,
+  PurchaseIntent,
+  RefundRecord,
+  RefundStatus,
+} from "./types.js";
 
 export class GovernanceError extends Error {
   constructor(
@@ -62,6 +70,43 @@ export interface AuthorizationDecision {
   reason: string;
   intent_id?: string;
   latency_ms: number;
+}
+
+/** A merchant refund reported by the card issuer (or an admin, for rails without refund events). */
+export interface RefundInput {
+  /** The issuer's ID for this refund. Repeats of the same ID are ignored. */
+  refund_id: string;
+  /** Major units, positive. */
+  amount: number;
+  currency?: string;
+  card_token?: string;
+  intent_id?: string;
+  merchant?: string;
+  source: string;
+}
+
+/**
+ * credited: budget given back. duplicate: this refund_id was already recorded. unmatched: no intent owns the card.
+ * over_original: it would take refunds past what was charged, so nothing was credited and a human should look.
+ */
+export type RefundOutcome = "credited" | "duplicate" | "unmatched" | "over_original";
+
+export interface RefundResult {
+  outcome: RefundOutcome;
+  message: string;
+  intent_id?: string;
+  credited: number;
+  refunded_total?: number;
+  refund_status?: RefundStatus;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** What was actually charged on an intent's card: approved real-time authorizations, else the card's limit. */
+export function chargedAmount(rec: IntentRecord): number {
+  const approved = (rec.authorizations ?? []).filter((a) => a.approved);
+  if (approved.length) return round2(approved.reduce((sum, a) => sum + a.amount, 0));
+  return rec.card?.spend_limit ?? 0;
 }
 
 /** The control plane: intent in, decision out, card only when the decision allows it. */
@@ -482,5 +527,103 @@ export class Governance {
     const decision = { ...result, latency_ms: Math.round((performance.now() - t0) * 100) / 100 };
     this.store.audit("jit_authorization", { ...decision, card_token: req.card_token, amount: req.amount, merchant: req.merchant, mcc: req.mcc });
     return decision;
+  }
+
+  /**
+   * Record a merchant refund against the intent that paid for it and give the budget back. The original intent is never
+   * edited; the refund is appended next to it. Safe to call with the same refund twice: the second call is a no-op.
+   * Refunds are never credited past what was charged, so a bad or replayed event can't hand an agent extra budget.
+   */
+  async recordRefund(input: RefundInput): Promise<RefundResult> {
+    const amount = round2(input.amount);
+    if (!input.refund_id || !Number.isFinite(amount) || amount <= 0) {
+      throw new GovernanceError("A refund needs a refund_id and a positive amount.", "bad_refund");
+    }
+    type Out = { result: RefundResult; notice?: RefundNotice };
+    const out = this.store.transact((intents, now): Out => {
+      const rec = input.intent_id
+        ? intents[input.intent_id]
+        : Object.values(intents).find((r) => input.card_token && r.card?.token === input.card_token);
+      const refund: RefundRecord = {
+        refund_id: input.refund_id,
+        ts: now.toISOString(),
+        amount,
+        currency: input.currency ?? rec?.card?.currency ?? rec?.intent.currency ?? this.config.policy.currency,
+        source: input.source,
+        ...(input.merchant ? { merchant: input.merchant } : {}),
+      };
+      const budget = this.config.policy.hard_limits.per_agent_daily_budget;
+      if (!rec) {
+        return {
+          result: { outcome: "unmatched", credited: 0, message: "No PurseString intent owns this card, so nothing was credited." },
+          notice: { outcome: "unmatched", refund, daily_budget: budget },
+        };
+      }
+      if ((rec.refunds ?? []).some((r) => r.refund_id === input.refund_id)) {
+        return {
+          result: {
+            outcome: "duplicate",
+            intent_id: rec.intent_id,
+            credited: 0,
+            refunded_total: rec.refunded_total,
+            refund_status: rec.refund_status,
+            message: `Refund ${input.refund_id} was already recorded on ${rec.intent_id}.`,
+          },
+        };
+      }
+      const charged = chargedAmount(rec);
+      const before = rec.refunded_total ?? 0;
+      if (round2(before + amount) > charged + 1e-9) {
+        return {
+          result: {
+            outcome: "over_original",
+            intent_id: rec.intent_id,
+            credited: 0,
+            refunded_total: before,
+            refund_status: rec.refund_status,
+            message: `Refund of ${amount.toFixed(2)} would take refunds on ${rec.intent_id} to ${(before + amount).toFixed(2)}, over the ${charged.toFixed(2)} charged. Nothing was credited; check it by hand.`,
+          },
+          notice: { outcome: "over_original", refund, record: rec, charged, daily_budget: budget },
+        };
+      }
+      rec.refunds = [...(rec.refunds ?? []), refund];
+      rec.refunded_total = round2(before + amount);
+      rec.refund_status = rec.refunded_total >= charged - 1e-9 ? "refunded" : "partially_refunded";
+      rec.updated_at = now.toISOString();
+      const spent = spentToday(intents, rec.intent.agent_id, now);
+      return {
+        result: {
+          outcome: "credited",
+          intent_id: rec.intent_id,
+          credited: amount,
+          refunded_total: rec.refunded_total,
+          refund_status: rec.refund_status,
+          message: `Credited ${amount.toFixed(2)} ${refund.currency} back to ${rec.intent.agent_id}.`,
+        },
+        notice: { outcome: "credited", refund, record: rec, charged, spent_today: spent, daily_budget: budget },
+      };
+    });
+
+    const { result, notice } = out;
+    this.store.audit(result.outcome === "credited" ? "refund_credited" : `refund_${result.outcome}`, {
+      intent_id: result.intent_id,
+      refund_id: input.refund_id,
+      amount,
+      currency: input.currency,
+      card_token: input.card_token,
+      merchant: input.merchant,
+      source: input.source,
+      credited: result.credited,
+      refunded_total: result.refunded_total,
+      refund_status: result.refund_status,
+    });
+    if (notice) {
+      try {
+        await this.notifier.refundRecorded?.(notice);
+      } catch (err) {
+        this.store.audit("refund_notify_failed", { intent_id: result.intent_id, refund_id: input.refund_id, error: String(err) });
+      }
+    }
+    return result;
   }
 }

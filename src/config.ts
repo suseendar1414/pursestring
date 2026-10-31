@@ -141,6 +141,11 @@ export interface Config {
     /** Slack app signing secret; turns on Approve/Deny buttons answered at POST /slack/actions. */
     slackSigningSecret?: string;
     discordWebhookUrl?: string;
+    /** Lithic event-subscription secret (whsec_...) for refund events at /webhooks/lithic. Not the ASA key. */
+    lithicEventsSecret?: string;
+    /** Where to POST refund events for your own systems, and the secret that signs them. */
+    refundWebhookUrl?: string;
+    refundWebhookSecret?: string;
   };
 }
 
@@ -186,6 +191,9 @@ export function loadConfig(): Config {
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET || undefined,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,
+    lithicEventsSecret: process.env.LITHIC_EVENTS_SECRET || undefined,
+    refundWebhookUrl: process.env.REFUND_WEBHOOK_URL || undefined,
+    refundWebhookSecret: process.env.REFUND_WEBHOOK_SECRET || undefined,
   };
 
   // A Lithic key in the environment switches the rail on without editing YAML.

@@ -81,6 +81,18 @@ Decisions are local (one locked JSON read) and take a few milliseconds, well ins
 
 Single-use cards close `cards.ttl_minutes` (default 10) after issue. JIT authorization declines them from that moment, `request_ephemeral_card` stops replaying them, and a background sweep closes them at the rail. Approved subscriptions get a merchant-locked card with a monthly cap instead, since they have to keep renewing.
 
+## Refunds
+
+When a merchant refunds a purchase, PurseString records it against the intent that paid for it and gives that money back to the agent's daily budget. The original intent is never edited: the refund is added next to it (`refunds`, `refunded_total`, `refund_status` of `partially_refunded` or `refunded`), so the log shows both what was spent and what came back.
+
+- **Where refunds come from.** Lithic sends a signed `RETURN` event to `POST /webhooks/lithic` (subscribe to transaction events and set `LITHIC_EVENTS_SECRET` to that subscription's secret). Other rails, or a person, can call `POST /refunds` with the admin token: `{"refund_id": "...", "amount": 6.00, "intent_id": "int_..."}` (or `card_token`).
+- **Only settled refunds count.** A credit authorization can still fall through, so budget comes back on the settled return, never on the agent's say-so.
+- **Retries are harmless.** Each refund carries the issuer's ID. The same ID twice is recorded once.
+- **Never more than was charged.** Refunds that would add up past the charge aren't credited. Neither are refunds on cards PurseString didn't issue. Both are logged and sent to Slack or Discord for a person to check.
+- **Everyone hears about it.** A credited refund posts to Slack or Discord with the amount, the intent and today's spend. Set `REFUND_WEBHOOK_URL` to also get a JSON `intent.refunded` (or `refund.needs_review`) event, signed with [Standard Webhooks](https://www.standardwebhooks.com) headers using `REFUND_WEBHOOK_SECRET`. The agent sees `refund_status` in `get_intent_status`.
+
+Budget comes back on the day the card was issued, since that's the day it counted against. The intent's `status` doesn't change, so a partly refunded subscription card keeps working.
+
 ## The intent
 
 | Field | Why it's required |
@@ -112,7 +124,7 @@ stateDiagram-v2
 
 ## The decision log
 
-`$PURSESTRING_HOME/decisions.jsonl` is append-only, one JSON object per event. Events: `policy_checked`, `intent_submitted`, `duplicate_intent_blocked`, `human_approved`, `human_denied`, `card_issued`, `card_replayed`, `card_issue_failed`, `jit_authorization`, `card_closed`, `card_close_failed`.
+`$PURSESTRING_HOME/decisions.jsonl` is append-only, one JSON object per event. Events: `policy_checked`, `intent_submitted`, `duplicate_intent_blocked`, `human_approved`, `human_denied`, `card_issued`, `card_replayed`, `card_issue_failed`, `jit_authorization`, `card_closed`, `card_close_failed`, `refund_credited`, `refund_duplicate`, `refund_unmatched`, `refund_over_original`, `refund_notify_failed`.
 
 An `intent_submitted` entry carries the full reasoning tree:
 

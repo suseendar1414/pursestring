@@ -43,6 +43,34 @@ interface LithicAsaRequest {
   merchant?: { descriptor?: string; mcc?: string; acceptor_id?: string };
 }
 
+/** The parts of a Lithic transaction event we read. Lithic amounts are in cents; return amounts may be negative. */
+interface LithicTransaction {
+  token?: string;
+  card_token?: string;
+  currency?: string;
+  merchant_currency?: string;
+  merchant?: { descriptor?: string };
+  events?: { token?: string; type?: string; amount?: number; result?: string }[];
+}
+
+/** Lithic event types that mean money came back to the card. Settled returns only: a credit authorization can still fall through. */
+const LITHIC_REFUND_EVENTS = new Set(["RETURN"]);
+
+/** Pull refund events out of a Lithic webhook, whatever the envelope (payload, data, or the transaction itself). */
+export function lithicRefunds(body: Record<string, unknown>) {
+  const tx = (body.payload ?? body.data ?? body) as LithicTransaction;
+  return (tx.events ?? [])
+    .filter((e) => e.type && LITHIC_REFUND_EVENTS.has(e.type) && (e.result ?? "APPROVED") === "APPROVED" && e.token && e.amount)
+    .map((e) => ({
+      refund_id: e.token!,
+      amount: Math.abs(e.amount!) / 100,
+      currency: tx.currency ?? tx.merchant_currency,
+      card_token: tx.card_token,
+      merchant: tx.merchant?.descriptor,
+      source: "lithic",
+    }));
+}
+
 interface SlackActionPayload {
   type?: string;
   user?: { id?: string; username?: string; name?: string };
@@ -80,6 +108,8 @@ function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
  *   GET  /intents?status=pending_approval   list intents          (admin token)
  *   POST /intents/:id/approve|deny     human decision             (admin token)
  *   POST /jit/lithic                   Lithic Auth Stream Access   (LITHIC_WEBHOOK_SECRET signature)
+ *   POST /webhooks/lithic              Lithic events: merchant refunds (LITHIC_EVENTS_SECRET signature)
+ *   POST /refunds                      record a refund by hand or from another rail (admin token)
  *   POST /slack/actions                Slack Approve/Deny buttons  (SLACK_SIGNING_SECRET signature)
  *   POST /jit/authorize                generic real-time authorization for other rails (admin token)
  *   /.well-known/*, /oauth/*           OAuth sign-in for remote MCP clients (when PURSESTRING_PUBLIC_URL is set)
@@ -147,6 +177,45 @@ export function startHttp(
           mcc: body.merchant?.mcc,
         });
         return send(res, 200, { token: body.token, result: LITHIC_RESULT[decision.code] });
+      }
+
+      if (url.pathname === "/webhooks/lithic" && req.method === "POST") {
+        const secret = gov.config.env.lithicEventsSecret;
+        if (!secret) return send(res, 503, { error: "set LITHIC_EVENTS_SECRET (your Lithic event subscription secret) to enable /webhooks/lithic" });
+        const raw = await readRaw(req);
+        if (!verifyStandardWebhook(secret, req.headers, raw)) return send(res, 401, { error: "bad signature" });
+        const refunds = lithicRefunds(JSON.parse(raw) as Record<string, unknown>);
+        const results = [];
+        for (const r of refunds) results.push(await gov.recordRefund(r));
+        // Always 200 on a verified event: an unmatched refund is for a human, and a retry wouldn't change the answer.
+        return send(res, 200, { received: true, refunds: results.map(({ outcome, intent_id, credited }) => ({ outcome, intent_id, credited })) });
+      }
+
+      if (url.pathname === "/refunds" && req.method === "POST") {
+        if (!bearerOk(req, adminToken)) {
+          return send(res, 401, { error: adminToken ? "unauthorized" : "set PURSESTRING_ADMIN_TOKEN to enable the refunds API" });
+        }
+        const body = ((await readJson(req)) ?? {}) as {
+          refund_id?: string;
+          amount?: number;
+          currency?: string;
+          intent_id?: string;
+          card_token?: string;
+          merchant?: string;
+        };
+        if (!body.refund_id || typeof body.amount !== "number" || (!body.intent_id && !body.card_token)) {
+          return send(res, 400, { error: "refund_id, amount (major units) and intent_id or card_token are required" });
+        }
+        const result = await gov.recordRefund({
+          refund_id: body.refund_id,
+          amount: body.amount,
+          currency: body.currency,
+          intent_id: body.intent_id,
+          card_token: body.card_token,
+          merchant: body.merchant,
+          source: "http",
+        });
+        return send(res, 200, result);
       }
 
       if (url.pathname === "/slack/actions" && req.method === "POST") {
