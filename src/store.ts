@@ -138,13 +138,16 @@ export class Store {
   }
 }
 
-/** Total of card spend limits issued, payouts sent and PayPal refunds made by an agent since 00:00 UTC. */
+/**
+ * Total an agent has spent since 00:00 UTC: card spend limits issued (less what merchants refunded on those cards),
+ * payouts sent and PayPal refunds made through governed tools.
+ */
 export function spentToday(intents: Record<string, IntentRecord>, agentId: string, now: Date): number {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   let sum = 0;
   for (const r of Object.values(intents)) {
     if (r.intent.agent_id !== agentId) continue;
-    if (r.card && new Date(r.card.issued_at) >= dayStart) sum += r.card.spend_limit;
+    if (r.card && new Date(r.card.issued_at) >= dayStart) sum += Math.max(0, r.card.spend_limit - (r.refunded_total ?? 0));
     if (r.payment && new Date(r.payment.sent_at) >= dayStart) sum += r.payment.amount;
     if (r.action?.executed_at && !r.action.is_error && new Date(r.action.executed_at) >= dayStart) sum += r.intent.amount;
   }

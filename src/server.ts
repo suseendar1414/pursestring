@@ -74,7 +74,17 @@ function view(gov: Governance, rec: IntentRecord) {
     payment: rec.payment
       ? { payment_id: rec.payment.payment_id, status: rec.payment.status, paid_to: rec.payment.payee.receiver }
       : undefined,
-    next_step: nextStep(rec, payout),
+    ...(rec.refund_status
+      ? {
+          refund_status: rec.refund_status,
+          refunded_total: rec.refunded_total,
+          refunds: rec.refunds?.map(({ amount, currency, ts }) => ({ amount, currency, ts })),
+        }
+      : {}),
+    next_step: rec.refund_status
+      ? `The merchant ${rec.refund_status === "refunded" ? "refunded this purchase in full" : "partly refunded this purchase"} and the budget was given back. ` +
+        "If you still need it, submit a new intent; don't reuse this one."
+      : nextStep(rec, payout),
   };
 }
 
