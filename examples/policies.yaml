@@ -50,14 +50,34 @@ notifications:
   # discord_webhook_url: https://discord.com/api/webhooks/...
 
 adapter:
-  # The default rail. mock | lithic | privacy | airwallex work today; highnote | marqeta | amex | network_token | ach are planned.
-  # LITHIC_API_KEY in the env switches the default to lithic automatically.
+  # The default rail. mock | lithic | privacy | airwallex | paypal work today; highnote | marqeta | amex | network_token | ach are planned.
+  # LITHIC_API_KEY (or else PAYPAL_CLIENT_ID) in the env switches the default to that rail automatically.
   type: mock
   lithic:
     environment: sandbox
   airwallex:
     environment: sandbox          # sandbox is Airwallex's demo environment
     # cardholder_id: ...          # or AIRWALLEX_CARDHOLDER_ID; agent cards are issued to this cardholder
+  paypal:
+    environment: sandbox          # api-m.sandbox.paypal.com; no real money
+
+# Where the paypal rail sends money for each vendor. The agent never picks the recipient,
+# so a vendor with no entry here can't be paid by payout. See docs/paypal.md.
+payees: []
+#  - vendor: pdfocr.io
+#    receiver: billing@pdfocr.io   # PayPal email, phone or PayPal account ID
+#    type: EMAIL                   # EMAIL | PHONE | PAYPAL_ID
+#    wallet: PAYPAL                # PAYPAL | VENMO (Venmo pays to a US phone number)
+
+# Run PayPal's own MCP server (@paypal/mcp) behind PurseString. Read-only tools pass through;
+# refunds, dispute acceptance and cancellations go through policy first. See docs/paypal.md.
+paypal_tools:
+  enabled: false                  # needs PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET
+  refunds:
+    auto_approve_under: 25        # smaller refunds run without a human
+    max_amount: 500               # bigger refunds are refused outright
+  require_approval: [accept_dispute_claim, cancel_subscription, cancel_sent_invoice, update_subscription]
+  deny: []
 
 # Pick a rail per purchase. First match wins; no match uses adapter.type.
 routes: []
@@ -65,6 +85,8 @@ routes: []
 #    min_amount: 1000
 #  - rail: amex                    # spend on the company's corporate Amex line
 #    vendors: ["*.salesforce.com"]
+#  - rail: paypal                  # vendors who invoice through PayPal get paid straight to their account
+#    vendors: ["pdfocr.io"]
 #  - rail: lithic                  # everything else under $500 on BaaS virtual cards
 #    max_amount: 500
 

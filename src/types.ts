@@ -39,7 +39,21 @@ export interface PolicyEvaluation {
   summary: string;
 }
 
-export type IntentStatus = "approved" | "pending_approval" | "denied" | "expired" | "issuing" | "card_issued";
+export type IntentStatus =
+  | "approved"
+  | "pending_approval"
+  | "denied"
+  | "expired"
+  | "issuing"
+  | "card_issued"
+  /** A payout rail is sending the money. */
+  | "paying"
+  /** A payout rail sent the money to the vendor's account on file. */
+  | "paid"
+  /** A governed PayPal MCP tool call is running. */
+  | "executing"
+  /** A governed PayPal MCP tool call ran. */
+  | "executed";
 
 export interface IntentRecord {
   intent_id: string;
@@ -62,6 +76,10 @@ export interface IntentRecord {
   /** The rail chosen by policy routing at submit time. */
   rail: string;
   card?: CardReference;
+  /** Set when a payout rail (PayPal, Venmo) paid the vendor directly instead of issuing a card. */
+  payment?: PaymentRecord;
+  /** Set when this intent governs a call to one of PayPal's own MCP tools instead of a purchase. */
+  action?: ActionRecord;
   /** Real-time authorization decisions made against this intent's card. */
   authorizations?: AuthorizationRecord[];
   /** Merchant refunds credited back against this intent. The original charge is never edited. */
@@ -115,4 +133,40 @@ export interface CardDetails extends CardReference {
   cvv: string;
   exp_month: string;
   exp_year: string;
+}
+
+export type PayeeType = "EMAIL" | "PHONE" | "PAYPAL_ID";
+export type PayeeWallet = "PAYPAL" | "VENMO";
+
+/** Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent. */
+export interface Payee {
+  receiver: string;
+  type: PayeeType;
+  wallet: PayeeWallet;
+}
+
+/** What we persist about a payout. */
+export interface PaymentRecord {
+  adapter: string;
+  /** The rail's ID for the payment, e.g. a PayPal payout_batch_id. */
+  payment_id: string;
+  /** The rail's status, e.g. PENDING, PROCESSING, SUCCESS. */
+  status: string;
+  amount: number;
+  currency: string;
+  payee: Payee;
+  sent_at: string;
+}
+
+/** A call to a PayPal MCP tool, held until policy or a human allows it, then run once. */
+export interface ActionRecord {
+  tool: string;
+  /** The arguments PayPal will get, exactly as approved. */
+  args: Record<string, unknown>;
+  /** SHA-256 of tool + args, so a re-call with different arguments can't ride an approval. */
+  args_hash: string;
+  executed_at?: string;
+  /** PayPal's answer, returned again if the agent repeats the call. */
+  result?: unknown;
+  is_error?: boolean;
 }

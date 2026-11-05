@@ -133,13 +133,16 @@ export function evaluate(
           (aa.require_allowlisted_vendor ? ", allowlisted vendor" : ""),
   );
 
+  return decide(rules);
+}
+
+function decide(rules: RuleResult[]): PolicyEvaluation {
   const failed = rules.filter((r) => !r.passed);
   const decision: Decision = failed.some((r) => r.effect === "deny")
     ? "deny"
     : failed.length > 0
       ? "require_approval"
       : "auto_approve";
-
   const summary =
     decision === "auto_approve"
       ? "All rules passed; safe to auto-approve."
@@ -148,8 +151,72 @@ export function evaluate(
           .filter((r) => decision !== "deny" || r.effect === "deny")
           .map((r) => `${r.rule} (${r.detail})`)
           .join("; ");
-
   return { decision, rules, summary };
+}
+
+/** PayPal MCP tools whose effect has an amount PurseString can read and budget. */
+const AMOUNT_TOOLS = new Set(["create_refund"]);
+
+/** Whether PurseString must rule on this PayPal tool before it runs. Everything else passes straight through. */
+export function isGovernedTool(policy: Policy, tool: string): boolean {
+  const t = policy.paypal_tools;
+  return AMOUNT_TOOLS.has(tool) || t.require_approval.includes(tool) || t.deny.includes(tool);
+}
+
+/** The money a PayPal tool call moves, when its arguments say. A full refund has no amount until PayPal looks it up. */
+export function toolCallAmount(args: Record<string, unknown>): { amount: number | null; currency: string | null } {
+  const a = args.amount as { value?: unknown; currency_code?: unknown } | undefined;
+  const value = a && typeof a === "object" ? Number(a.value) : NaN;
+  return {
+    amount: Number.isFinite(value) && value >= 0 ? value : null,
+    currency: a && typeof a.currency_code === "string" ? a.currency_code.toUpperCase() : null,
+  };
+}
+
+/** Rule on a call to one of PayPal's own MCP tools (refunds, dispute acceptance, cancellations). */
+export function evaluateToolCall(
+  policy: Policy,
+  tool: string,
+  args: Record<string, unknown>,
+  ctx: { agentId: string; spentTodayByAgent: number },
+): PolicyEvaluation {
+  const t = policy.paypal_tools;
+  const cur = policy.currency;
+  const rules: RuleResult[] = [];
+  const add = (rule: string, passed: boolean, effect: Decision, detail: string) => rules.push({ rule, passed, effect, detail });
+
+  add("paypal_tools.deny", !t.deny.includes(tool), "deny", `${tool} ${t.deny.includes(tool) ? "is" : "is not"} on the deny list`);
+  if (t.require_approval.includes(tool)) {
+    add("paypal_tools.require_approval", false, "require_approval", `${tool} always needs a human`);
+  }
+  if (AMOUNT_TOOLS.has(tool)) {
+    const { amount, currency } = toolCallAmount(args);
+    if (amount === null) {
+      add("paypal_tools.refunds.amount", false, "require_approval", "no amount given, so PayPal refunds the full capture");
+    } else {
+      if (currency) add("currency", currency === cur.toUpperCase(), "deny", `refund currency ${currency}, policy currency ${cur}`);
+      add(
+        "paypal_tools.refunds.max_amount",
+        amount <= t.refunds.max_amount,
+        "deny",
+        `${fmt(amount, cur)} vs refund cap ${fmt(t.refunds.max_amount, cur)}`,
+      );
+      add(
+        "paypal_tools.refunds.auto_approve_under",
+        amount < t.refunds.auto_approve_under,
+        "require_approval",
+        `${fmt(amount, cur)} vs auto-approve limit ${fmt(t.refunds.auto_approve_under, cur)}`,
+      );
+      const projected = ctx.spentTodayByAgent + amount;
+      add(
+        "hard_limits.per_agent_daily_budget",
+        projected <= policy.hard_limits.per_agent_daily_budget,
+        "require_approval",
+        `${ctx.agentId} has ${fmt(ctx.spentTodayByAgent, cur)} out today; this makes ${fmt(projected, cur)} of ${fmt(policy.hard_limits.per_agent_daily_budget, cur)}`,
+      );
+    }
+  }
+  return decide(rules);
 }
 
 /** Choose the rail for a purchase: the first matching route in policies.yaml, else adapter.type. */

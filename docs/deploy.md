@@ -26,6 +26,7 @@ Both modes use the same policy file and keep their state in one directory (`PURS
 - [Approving over HTTP](#approving-over-http)
 - [ChatGPT and other OAuth clients](#chatgpt-and-other-oauth-clients)
 - [Lithic virtual cards](#lithic-virtual-cards)
+- [Public demo on Render](#public-demo-on-render)
 - [Environment variables](#environment-variables)
 - [Production checklist](#production-checklist)
 - [Troubleshooting](#troubleshooting)
@@ -234,6 +235,20 @@ To try the logic without Lithic, use the mock rail: `pursestring simulate-charge
 
 To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER` to a rail name (for example `mock` or `lithic`).
 
+## Public demo on Render
+
+`PURSESTRING_DEMO=1` adds a public demo page at `/demo` (and redirects `/` there). A scripted agent makes real MCP tool calls to a real PurseString server, and the visitor approves or denies what policy pauses. The scenarios cover purchases paid through the PayPal payout rail and refunds made through PayPal's MCP tools. The demo keeps its own throwaway state, so `/mcp` and the approval API stay separate and locked behind their tokens. A simple global limit stops the page from being used to flood the PayPal sandbox.
+
+The repo ships a Render Blueprint (`render.yaml`):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/suseendar1414/pursestring)
+
+1. Click the button and sign in to Render. It builds the Dockerfile on the free plan and generates `PURSESTRING_TOKEN` and `PURSESTRING_ADMIN_TOKEN`.
+2. Optionally fill in `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` from a PayPal **sandbox** app ([docs/paypal.md](paypal.md)), and `DEMO_PAYEE_EMAIL` with a sandbox personal account. With these set, demo payouts land in the PayPal sandbox and show up in that account. Without them, payouts are simulated, and the page says so.
+3. Open `https://<your-service>.onrender.com/demo`.
+
+Refunds in the demo always go to a built-in stand-in for PayPal's MCP server with the same tool names and arguments, because a real refund needs a real captured payment. The page labels them as simulated. Free Render services sleep when idle, so the first visit can take about 30 seconds.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -252,6 +267,9 @@ To force a rail regardless of the policy file, set `PURSESTRING_ADAPTER` to a ra
 | `LITHIC_EVENTS_SECRET` | unset | Lithic event subscription secret; enables refunds at `/webhooks/lithic` |
 | `REFUND_WEBHOOK_URL` | unset | Your own URL to receive signed `intent.refunded` events |
 | `REFUND_WEBHOOK_SECRET` | unset | Signs the events sent to `REFUND_WEBHOOK_URL` (Standard Webhooks) |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | unset | PayPal payouts and governing PayPal's MCP server. See [paypal.md](paypal.md) |
+| `PURSESTRING_DEMO` | unset | `1` serves the public demo at `/demo` in HTTP mode |
+| `DEMO_PAYEE_EMAIL` | `vendor@pdfocr.example` | Who receives the demo's sandbox payouts |
 | `PURSESTRING_ADAPTER` | from policy | Force the default rail |
 
 ## Production checklist

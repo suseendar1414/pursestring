@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 
-export const RAILS = ["mock", "lithic", "privacy", "airwallex", "highnote", "marqeta", "amex", "network_token", "ach"] as const;
+export const RAILS = ["mock", "lithic", "privacy", "airwallex", "paypal", "highnote", "marqeta", "amex", "network_token", "ach"] as const;
 const RailName = z.enum(RAILS);
 export type RailName = z.infer<typeof RailName>;
 
@@ -19,6 +19,17 @@ const RouteSchema = z.object({
   vendors: z.array(z.string()).optional(),
 });
 export type Route = z.infer<typeof RouteSchema>;
+
+const PayeeSchema = z.object({
+  /** Vendor pattern, same syntax as the allowlist. */
+  vendor: z.string().min(1),
+  /** The vendor's PayPal email, phone number or PayPal account ID. */
+  receiver: z.string().min(1),
+  type: z.enum(["EMAIL", "PHONE", "PAYPAL_ID"]).default("EMAIL"),
+  /** Pay into the vendor's PayPal or Venmo account. */
+  wallet: z.enum(["PAYPAL", "VENMO"]).default("PAYPAL"),
+});
+export type PayeeEntry = z.infer<typeof PayeeSchema>;
 
 const PolicySchema = z.object({
   version: z.literal(1).default(1),
@@ -101,8 +112,54 @@ const PolicySchema = z.object({
           cardholder_id: z.string().optional(),
         })
         .default({ environment: "sandbox" }),
+      paypal: z
+        .object({
+          environment: z.enum(["sandbox", "production"]).default("sandbox"),
+        })
+        .default({ environment: "sandbox" }),
     })
-    .default({ type: "mock", lithic: { environment: "sandbox" }, airwallex: { environment: "sandbox" } }),
+    .default({
+      type: "mock",
+      lithic: { environment: "sandbox" },
+      airwallex: { environment: "sandbox" },
+      paypal: { environment: "sandbox" },
+    }),
+  /**
+   * Where payout rails (PayPal, Venmo) send money for each vendor. The agent never supplies a payee:
+   * a vendor with no entry here can't be paid by payout.
+   */
+  payees: z.array(PayeeSchema).default([]),
+  /**
+   * Govern PayPal's own MCP server (@paypal/mcp): PurseString runs it behind itself and re-exposes its tools.
+   * Read-only tools pass straight through; tools that move money or can't be undone go through policy first.
+   */
+  paypal_tools: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** The upstream PayPal MCP server, started with PAYPAL_ACCESS_TOKEN set from PAYPAL_CLIENT_ID / SECRET. */
+      command: z.array(z.string()).min(1).default(["npx", "-y", "@paypal/mcp@1.8.1", "--tools=all"]),
+      refunds: z
+        .object({
+          /** Refunds strictly under this amount run without a human. */
+          auto_approve_under: z.number().nonnegative().default(25),
+          /** Refunds over this amount are refused outright, even with a human. */
+          max_amount: z.number().positive().default(500),
+        })
+        .default({ auto_approve_under: 25, max_amount: 500 }),
+      /** Tools that always wait for a human, whatever the amount. */
+      require_approval: z
+        .array(z.string())
+        .default(["accept_dispute_claim", "cancel_subscription", "cancel_sent_invoice", "update_subscription"]),
+      /** Tools the agent can never call. */
+      deny: z.array(z.string()).default([]),
+    })
+    .default({
+      enabled: false,
+      command: ["npx", "-y", "@paypal/mcp@1.8.1", "--tools=all"],
+      refunds: { auto_approve_under: 25, max_amount: 500 },
+      require_approval: ["accept_dispute_claim", "cancel_subscription", "cancel_sent_invoice", "update_subscription"],
+      deny: [],
+    }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z
@@ -135,6 +192,8 @@ export interface Config {
     airwallexClientId?: string;
     airwallexApiKey?: string;
     airwallexCardholderId?: string;
+    paypalClientId?: string;
+    paypalClientSecret?: string;
     /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
     lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
@@ -188,6 +247,8 @@ export function loadConfig(): Config {
     airwallexClientId: process.env.AIRWALLEX_CLIENT_ID || undefined,
     airwallexApiKey: process.env.AIRWALLEX_API_KEY || undefined,
     airwallexCardholderId: process.env.AIRWALLEX_CARDHOLDER_ID || policy.adapter.airwallex.cardholder_id,
+    paypalClientId: process.env.PAYPAL_CLIENT_ID || undefined,
+    paypalClientSecret: process.env.PAYPAL_CLIENT_SECRET || undefined,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET || undefined,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,
@@ -199,6 +260,8 @@ export function loadConfig(): Config {
   // A Lithic key in the environment switches the rail on without editing YAML.
   if (env.lithicApiKey && !process.env.PURSESTRING_ADAPTER && policy.adapter.type === "mock") {
     policy.adapter.type = "lithic";
+  } else if (env.paypalClientId && !process.env.PURSESTRING_ADAPTER && policy.adapter.type === "mock") {
+    policy.adapter.type = "paypal";
   }
   const forced = process.env.PURSESTRING_ADAPTER;
   if (forced && (RAILS as readonly string[]).includes(forced)) {

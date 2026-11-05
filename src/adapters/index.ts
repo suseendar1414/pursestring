@@ -2,11 +2,12 @@ import type { Config, RailName } from "../config.js";
 import { AirwallexAdapter } from "./airwallex.js";
 import { LithicAdapter } from "./lithic.js";
 import { MockAdapter } from "./mock.js";
+import { PayPalAdapter } from "./paypal.js";
 import { planned } from "./planned.js";
 import { PrivacyAdapter } from "./privacy.js";
 import type { CardAdapter } from "./types.js";
 
-export type { CardAdapter, IssueCardRequest } from "./types.js";
+export type { CardAdapter, IssueCardRequest, PayoutRequest, PayoutResult } from "./types.js";
 
 /** All rails, built on first use so an unconfigured rail only errors if a purchase is routed to it. */
 export class Rails {
@@ -49,6 +50,13 @@ export class Rails {
           );
         }
         return new AirwallexAdapter({ clientId, apiKey, cardholderId, environment: this.config.policy.adapter.airwallex.environment });
+      }
+      case "paypal": {
+        const { paypalClientId: clientId, paypalClientSecret: clientSecret } = this.config.env;
+        if (!clientId || !clientSecret) {
+          throw new Error("A purchase was routed to 'paypal' but PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are not both set.");
+        }
+        return new PayPalAdapter({ clientId, clientSecret, environment: this.config.policy.adapter.paypal.environment });
       }
       case "highnote":
       case "marqeta":

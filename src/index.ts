@@ -10,6 +10,9 @@ import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
 import { WebhookNotifier } from "./notify.js";
 import { revokeAllOAuth } from "./oauth.js";
+import { PayPalAdapter } from "./adapters/paypal.js";
+import { PayPalMcpUpstream } from "./paypal-mcp.js";
+import { Demo } from "./demo.js";
 import { createMcpServer, VERSION } from "./server.js";
 import { Store } from "./store.js";
 
@@ -43,6 +46,10 @@ Environment:
   PRIVACY_API_KEY      Enables the privacy rail (Privacy.com cards, real money, route to it in policies.yaml)
   AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY, AIRWALLEX_CARDHOLDER_ID
                        Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
+  PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET
+                       Enable the paypal rail (pays vendors' PayPal or Venmo accounts on file; sandbox by default)
+  PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
+                          PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
   PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API, and the password on the OAuth consent page
   PURSESTRING_PUBLIC_URL  Public https address of this server; turns on OAuth sign-in for ChatGPT and claude.ai
@@ -53,6 +60,21 @@ function build() {
   const store = new Store(config.homeDir);
   const gov = new Governance(config, store, new Rails(config), new WebhookNotifier(config));
   return { config, store, gov };
+}
+
+/** Start PayPal's own MCP server behind PurseString when paypal_tools.enabled is set. */
+async function startPayPalTools(config: ReturnType<typeof loadConfig>) {
+  const t = config.policy.paypal_tools;
+  if (!t.enabled) return undefined;
+  const { paypalClientId: clientId, paypalClientSecret: clientSecret } = config.env;
+  if (!clientId || !clientSecret) {
+    throw new Error("paypal_tools.enabled is set but PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are not both set.");
+  }
+  const environment = config.policy.adapter.paypal.environment;
+  const auth = new PayPalAdapter({ clientId, clientSecret, environment });
+  const upstream = await PayPalMcpUpstream.spawn(t.command, environment, () => auth.accessToken()).start();
+  console.error(`[pursestring] governing ${upstream.tools.length} PayPal MCP tools (${environment})`);
+  return upstream;
 }
 
 /** Close expired single-use cards in the background while the server runs. */
@@ -96,11 +118,16 @@ async function main() {
               : "Set SLACK_WEBHOOK_URL or DISCORD_WEBHOOK_URL to turn them on."),
         );
       }
+      const upstream = await startPayPalTools(config);
       if (values.http || process.env.PURSESTRING_TRANSPORT === "http") {
-        startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1");
+        const demo = process.env.PURSESTRING_DEMO === "1" ? await new Demo(config.env).reset() : undefined;
+        startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1", {
+          upstream,
+          demo,
+        });
         return;
       }
-      const server = createMcpServer(gov);
+      const server = createMcpServer(gov, upstream);
       await server.connect(new StdioServerTransport());
       console.error(
         `[pursestring] stdio server ready (rail: ${gov.rails.default}, policy: ${config.policyPath ?? "built-in defaults"}, home: ${config.homeDir})`,
