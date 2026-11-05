@@ -12,6 +12,7 @@ import { WebhookNotifier } from "./notify.js";
 import { revokeAllOAuth } from "./oauth.js";
 import { PayPalAdapter } from "./adapters/paypal.js";
 import { PayPalMcpUpstream } from "./paypal-mcp.js";
+import { Demo } from "./demo.js";
 import { createMcpServer, VERSION } from "./server.js";
 import { Store } from "./store.js";
 
@@ -47,6 +48,8 @@ Environment:
                        Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET
                        Enable the paypal rail (pays vendors' PayPal or Venmo accounts on file; sandbox by default)
+  PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
+                          PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
   PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API, and the password on the OAuth consent page
   PURSESTRING_PUBLIC_URL  Public https address of this server; turns on OAuth sign-in for ChatGPT and claude.ai
@@ -117,8 +120,10 @@ async function main() {
       }
       const upstream = await startPayPalTools(config);
       if (values.http || process.env.PURSESTRING_TRANSPORT === "http") {
+        const demo = process.env.PURSESTRING_DEMO === "1" ? await new Demo(config.env).reset() : undefined;
         startHttp(gov, Number(values.port ?? process.env.PORT ?? 8787), values.host ?? process.env.HOST ?? "127.0.0.1", {
           upstream,
+          demo,
         });
         return;
       }

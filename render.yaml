@@ -1,0 +1,25 @@
+# Render Blueprint for the public PurseString demo (https://render.com/docs/blueprint-spec).
+# Deploy: https://render.com/deploy?repo=https://github.com/suseendar1414/pursestring
+services:
+  - type: web
+    name: pursestring-demo
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      # Serve the demo at / and /demo, with its own throwaway state.
+      - key: PURSESTRING_DEMO
+        value: "1"
+      # /mcp and the approval API stay locked behind tokens; only the demo is public.
+      - key: PURSESTRING_TOKEN
+        generateValue: true
+      - key: PURSESTRING_ADMIN_TOKEN
+        generateValue: true
+      # Optional: PayPal sandbox app credentials. With them, demo payouts go to the PayPal sandbox.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # Optional: a sandbox personal account email that receives the demo payouts.
+      - key: DEMO_PAYEE_EMAIL
+        sync: false

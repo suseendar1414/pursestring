@@ -5,6 +5,7 @@ import { verifySlackSignature } from "./approvals.js";
 import { Governance, GovernanceError, type AuthorizationCode } from "./governance.js";
 import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
+import { handleDemo, type Demo } from "./demo.js";
 import type { Upstream } from "./paypal-mcp.js";
 import { createMcpServer, VERSION } from "./server.js";
 
@@ -78,6 +79,7 @@ function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
  * Streamable HTTP mode, for Docker and remote agents.
  *   POST /mcp                          MCP endpoint (stateless)
  *   GET  /healthz                      liveness
+ *   GET  /demo, /demo/api/*            public demo with its own throwaway state (PURSESTRING_DEMO=1 only)
  *   GET  /intents?status=pending_approval   list intents          (admin token)
  *   POST /intents/:id/approve|deny     human decision             (admin token)
  *   POST /jit/lithic                   Lithic Auth Stream Access   (LITHIC_WEBHOOK_SECRET signature)
@@ -92,7 +94,7 @@ export function startHttp(
   gov: Governance,
   port: number,
   host: string,
-  opts: { quiet?: boolean; publicUrl?: string; upstream?: Upstream } = {},
+  opts: { quiet?: boolean; publicUrl?: string; upstream?: Upstream; demo?: Demo } = {},
 ) {
   const mcpToken = process.env.PURSESTRING_TOKEN;
   const adminToken = process.env.PURSESTRING_ADMIN_TOKEN;
@@ -110,6 +112,8 @@ export function startHttp(
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
       if (url.pathname === "/healthz") return send(res, 200, { ok: true, version: VERSION, rail: gov.rails.default });
+
+      if (opts.demo && (await handleDemo(opts.demo, req, res, url))) return;
 
       if (oauth && (await oauth.handle(req, res, url))) return;
 
@@ -234,6 +238,7 @@ export function startHttp(
   server.listen(port, host, () => {
     if (opts.quiet) return;
     console.error(`[pursestring] HTTP MCP server on http://${host}:${port}/mcp (rail: ${gov.rails.default})`);
+    if (opts.demo) console.error(`[pursestring] public demo on http://${host}:${port}/demo`);
     if (oauth) console.error(`[pursestring] OAuth sign-in on: add ${oauth.resource} as a connector in ChatGPT or Claude`);
     else if (!mcpToken) console.error("[pursestring] warning: PURSESTRING_TOKEN is not set, /mcp is unauthenticated. Keep it on a private network.");
   });
