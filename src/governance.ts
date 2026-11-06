@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import type { Notifier, RefundNotice } from "./notify.js";
 import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel } from "./policy.js";
 import { createHash } from "node:crypto";
+import { exponent, formatMinor, isWholeMinor, toMajor, toMinor } from "./money.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
 import type {
   ActionRecord,
@@ -150,13 +151,31 @@ export interface RefundResult {
   refund_status?: RefundStatus;
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+/** The currency an intent's money moved in: its card's, else what the agent asked for. */
+const recordCurrency = (rec: IntentRecord) => rec.card?.currency ?? rec.intent.currency;
+
+/** What was actually charged on an intent's card, in minor units: approved real-time authorizations, else the card's limit. */
+function chargedMinor(rec: IntentRecord): number {
+  const cur = recordCurrency(rec);
+  const approved = (rec.authorizations ?? []).filter((a) => a.approved);
+  if (approved.length) return approved.reduce((sum, a) => sum + toMinor(a.amount, cur), 0);
+  return toMinor(rec.card?.spend_limit ?? 0, cur);
+}
 
 /** What was actually charged on an intent's card: approved real-time authorizations, else the card's limit. */
 export function chargedAmount(rec: IntentRecord): number {
-  const approved = (rec.authorizations ?? []).filter((a) => a.approved);
-  if (approved.length) return round2(approved.reduce((sum, a) => sum + a.amount, 0));
-  return rec.card?.spend_limit ?? 0;
+  return toMajor(chargedMinor(rec), recordCurrency(rec));
+}
+
+/** Refuse an amount finer than its currency allows (15.001 USD, 1500.5 JPY) instead of silently rounding it. */
+function checkAmount(intent: PurchaseIntent): void {
+  if (!isWholeMinor(intent.amount, intent.currency)) {
+    const places = exponent(intent.currency);
+    throw new GovernanceError(
+      `${intent.amount} ${intent.currency.toUpperCase()} has more decimals than ${intent.currency.toUpperCase()} allows (${places === 0 ? "none" : places}).`,
+      "bad_amount",
+    );
+  }
 }
 
 /** The control plane: intent in, decision out, card only when the decision allows it. */
@@ -191,9 +210,12 @@ export class Governance {
 
   /** Dry run: what would happen if this intent were submitted now. Changes nothing but the audit log. */
   checkCompliance(intent: PurchaseIntent): { evaluation: PolicyEvaluation; idempotency_key: string; existing?: IntentRecord } {
+    checkAmount(intent);
     const key = idempotencyKey(intent);
     const out = this.store.transact((intents, now) => ({
-      evaluation: evaluate(this.config.policy, intent, { spentTodayByAgent: spentToday(intents, intent.agent_id, now) }),
+      evaluation: evaluate(this.config.policy, intent, {
+        spentTodayByAgent: spentToday(intents, intent.agent_id, now, this.config.policy.currency),
+      }),
       existing: this.findRecent(intents, key, now),
     }));
     this.store.audit("policy_checked", {
@@ -207,13 +229,14 @@ export class Governance {
 
   /** How an intent is ruled on: the purchase policy, or the PayPal-tool policy for a governed tool call. */
   private evaluateRecord(intent: PurchaseIntent, action: ActionRecord | undefined, intents: Record<string, IntentRecord>, now: Date) {
-    const spent = spentToday(intents, intent.agent_id, now);
+    const spent = spentToday(intents, intent.agent_id, now, this.config.policy.currency);
     return action
       ? evaluateToolCall(this.config.policy, action.tool, action.args, { agentId: intent.agent_id, spentTodayByAgent: spent })
       : evaluate(this.config.policy, intent, { spentTodayByAgent: spent });
   }
 
   async submitIntent(intent: PurchaseIntent, action?: ActionRecord): Promise<SubmitResult> {
+    checkAmount(intent);
     const key = idempotencyKey(intent);
     let approvalCode: string | undefined;
     const result = this.store.transact((intents, now): SubmitResult => {
@@ -782,21 +805,28 @@ export class Governance {
         return decide("card_expired", `Single-use card expired at ${card.expires_at}.`);
       }
       const approvedBefore = (rec.authorizations ?? []).filter((a) => a.approved);
-      const cap = card.spend_limit * (1 + jit.tolerance_percent / 100);
+      // All in whole minor units of the card's currency. The tolerance is applied in basis points and rounded down,
+      // so a 10% tolerance on 15.00 allows exactly 16.50 and never a fraction of a cent more.
+      const cur = card.currency;
+      const fmt = (minor: number) => formatMinor(minor, cur);
+      const limit = toMinor(card.spend_limit, cur);
+      const toleranceBp = Math.round(jit.tolerance_percent * 100);
+      const cap = limit + Math.floor((limit * toleranceBp) / 10_000);
+      const amount = toMinor(req.amount, cur);
       if (card.single_use) {
         if (approvedBefore.length > 0) return decide("already_used", "Single-use card was already charged once.");
-        if (req.amount > cap + 1e-9) {
-          return decide("over_amount", `${req.amount.toFixed(2)} is over the approved ${card.spend_limit.toFixed(2)} ${card.currency}.`);
+        if (amount > cap) {
+          return decide("over_amount", `${fmt(amount)} is over the approved ${fmt(limit)} ${cur}.`);
         }
       } else {
         const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
         const spentThisMonth = approvedBefore
           .filter((a) => new Date(a.ts) >= monthStart)
-          .reduce((sum, a) => sum + a.amount, 0);
-        if (spentThisMonth + req.amount > cap + 1e-9) {
+          .reduce((sum, a) => sum + toMinor(a.amount, cur), 0);
+        if (spentThisMonth + amount > cap) {
           return decide(
             "over_amount",
-            `${req.amount.toFixed(2)} would take this month to ${(spentThisMonth + req.amount).toFixed(2)}, over the approved ${card.spend_limit.toFixed(2)} ${card.currency}/month.`,
+            `${fmt(amount)} would take this month to ${fmt(spentThisMonth + amount)}, over the approved ${fmt(limit)} ${cur}/month.`,
           );
         }
       }
@@ -832,20 +862,25 @@ export class Governance {
    * Refunds are never credited past what was charged, so a bad or replayed event can't hand an agent extra budget.
    */
   async recordRefund(input: RefundInput): Promise<RefundResult> {
-    const amount = round2(input.amount);
-    if (!input.refund_id || !Number.isFinite(amount) || amount <= 0) {
+    if (!input.refund_id || !Number.isFinite(input.amount) || input.amount <= 0) {
       throw new GovernanceError("A refund needs a refund_id and a positive amount.", "bad_refund");
     }
+    // Audit and error text use the amount as given; the transaction below works in the record's minor units.
+    let amount = input.amount;
     type Out = { result: RefundResult; notice?: RefundNotice };
     const out = this.store.transact((intents, now): Out => {
       const rec = input.intent_id
         ? intents[input.intent_id]
         : Object.values(intents).find((r) => input.card_token && r.card?.token === input.card_token);
+      const currency = input.currency ?? rec?.card?.currency ?? rec?.intent.currency ?? this.config.policy.currency;
+      const amountMinor = toMinor(input.amount, currency);
+      amount = toMajor(amountMinor, currency);
+      const fmt = (minor: number) => formatMinor(minor, currency);
       const refund: RefundRecord = {
         refund_id: input.refund_id,
         ts: now.toISOString(),
         amount,
-        currency: input.currency ?? rec?.card?.currency ?? rec?.intent.currency ?? this.config.policy.currency,
+        currency,
         source: input.source,
         ...(input.merchant ? { merchant: input.merchant } : {}),
       };
@@ -868,9 +903,11 @@ export class Governance {
           },
         };
       }
-      const charged = chargedAmount(rec);
-      const before = rec.refunded_total ?? 0;
-      if (round2(before + amount) > charged + 1e-9) {
+      const chargedM = chargedMinor(rec);
+      const charged = toMajor(chargedM, currency);
+      const beforeM = toMinor(rec.refunded_total ?? 0, currency);
+      const before = toMajor(beforeM, currency);
+      if (beforeM + amountMinor > chargedM) {
         return {
           result: {
             outcome: "over_original",
@@ -878,16 +915,16 @@ export class Governance {
             credited: 0,
             refunded_total: before,
             refund_status: rec.refund_status,
-            message: `Refund of ${amount.toFixed(2)} would take refunds on ${rec.intent_id} to ${(before + amount).toFixed(2)}, over the ${charged.toFixed(2)} charged. Nothing was credited; check it by hand.`,
+            message: `Refund of ${fmt(amountMinor)} would take refunds on ${rec.intent_id} to ${fmt(beforeM + amountMinor)}, over the ${fmt(chargedM)} charged. Nothing was credited; check it by hand.`,
           },
           notice: { outcome: "over_original", refund, record: rec, charged, daily_budget: budget },
         };
       }
       rec.refunds = [...(rec.refunds ?? []), refund];
-      rec.refunded_total = round2(before + amount);
-      rec.refund_status = rec.refunded_total >= charged - 1e-9 ? "refunded" : "partially_refunded";
+      rec.refunded_total = toMajor(beforeM + amountMinor, currency);
+      rec.refund_status = beforeM + amountMinor >= chargedM ? "refunded" : "partially_refunded";
       rec.updated_at = now.toISOString();
-      const spent = spentToday(intents, rec.intent.agent_id, now);
+      const spent = spentToday(intents, rec.intent.agent_id, now, this.config.policy.currency);
       return {
         result: {
           outcome: "credited",
@@ -895,7 +932,7 @@ export class Governance {
           credited: amount,
           refunded_total: rec.refunded_total,
           refund_status: rec.refund_status,
-          message: `Credited ${amount.toFixed(2)} ${refund.currency} back to ${rec.intent.agent_id}.`,
+          message: `Credited ${fmt(amountMinor)} ${refund.currency} back to ${rec.intent.agent_id}.`,
         },
         notice: { outcome: "credited", refund, record: rec, charged, spent_today: spent, daily_budget: budget },
       };

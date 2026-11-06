@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { verifySlackSignature } from "./approvals.js";
 import { Governance, GovernanceError, type AuthorizationCode } from "./governance.js";
+import { formatMoney } from "./money.js";
 import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
 import { handleDemo, type Demo } from "./demo.js";
@@ -250,7 +251,7 @@ export function startHttp(
           const rec = gov.decide(action.value, approve, who, undefined, { via: "slack" });
           slackRespond(payload.response_url, {
             replace_original: true,
-            text: `${approve ? ":white_check_mark: Approved" : ":no_entry: Denied"} by <@${userId}>: ${rec.intent.amount.toFixed(2)} ${rec.intent.currency} at ${rec.intent.vendor_domain} (${rec.intent_id})`,
+            text: `${approve ? ":white_check_mark: Approved" : ":no_entry: Denied"} by <@${userId}>: ${formatMoney(rec.intent.amount, rec.intent.currency)} at ${rec.intent.vendor_domain} (${rec.intent_id})`,
           });
         } catch (err) {
           slackRespond(payload.response_url, { response_type: "ephemeral", replace_original: false, text: (err as Error).message });

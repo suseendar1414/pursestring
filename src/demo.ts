@@ -257,7 +257,7 @@ export class Demo {
       const mine = intents.filter((r) => r.intent.agent_id === agent_id);
       return {
         agent_id,
-        spent_today: spentToday(Object.fromEntries(mine.map((r) => [r.intent_id, r])), agent_id, now),
+        spent_today: spentToday(Object.fromEntries(mine.map((r) => [r.intent_id, r])), agent_id, now, p.currency),
         budget: p.hard_limits.per_agent_daily_budget,
         intents: mine.length,
         waiting: mine.filter((r) => r.status === "pending_approval").length,

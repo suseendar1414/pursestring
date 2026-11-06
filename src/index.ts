@@ -8,6 +8,7 @@ import { Rails } from "./adapters/index.js";
 import { loadConfig } from "./config.js";
 import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
+import { formatMoney } from "./money.js";
 import { WebhookNotifier } from "./notify.js";
 import { revokeAllOAuth } from "./oauth.js";
 import { PayPalAdapter } from "./adapters/paypal.js";
@@ -152,7 +153,7 @@ async function main() {
       if (!rows.length) return void console.log("Nothing waiting for approval.");
       for (const r of rows) {
         const i = r.intent;
-        console.log(`${r.intent_id}  ${i.amount.toFixed(2)} ${i.currency}  ${i.vendor_domain}${i.is_recurring ? " (recurring)" : ""}  agent=${i.agent_id} task=${i.task_id}`);
+        console.log(`${r.intent_id}  ${formatMoney(i.amount, i.currency)}  ${i.vendor_domain}${i.is_recurring ? " (recurring)" : ""}  agent=${i.agent_id} task=${i.task_id}`);
         console.log(`    goal: ${i.task_goal}`);
         console.log(`    why:  ${r.evaluation.summary}`);
       }

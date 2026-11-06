@@ -1,3 +1,4 @@
+import { exponent, toMinor } from "../money.js";
 import { LithicAdapter } from "./lithic.js";
 
 /**
@@ -15,7 +16,9 @@ export class PrivacyAdapter extends LithicAdapter {
     this.baseUrl = "https://api.privacy.com/v1";
   }
 
-  protected override spendLimitCents(amount: number): number {
-    return Math.ceil(amount) * 100;
+  protected override spendLimitCents(amount: number, currency: string): number {
+    // Round up in integers: 15.00 stays 1500, 15.01 becomes 1600. (Math.ceil on a float can turn 15.00 into 16.)
+    const unit = 10 ** exponent(currency);
+    return Math.ceil(toMinor(amount, currency) / unit) * unit;
   }
 }
