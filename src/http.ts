@@ -281,6 +281,14 @@ export function startHttp(
         return send(res, 200, decision);
       }
 
+      if (url.pathname === "/audit/verify" && req.method === "GET") {
+        if (!bearerOk(req, adminToken)) {
+          return send(res, 401, { error: adminToken ? "unauthorized" : "set PURSESTRING_ADMIN_TOKEN to enable the audit API" });
+        }
+        const r = gov.store.verifyAudit();
+        return send(res, r.ok ? 200 : 409, r);
+      }
+
       if (url.pathname.startsWith("/intents")) {
         if (!bearerOk(req, adminToken)) {
           return send(res, 401, { error: adminToken ? "unauthorized" : "set PURSESTRING_ADMIN_TOKEN to enable the approval API" });

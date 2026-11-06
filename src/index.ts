@@ -29,6 +29,8 @@ Usage:
                                 required when approvals.require_code is on
   pursestring deny <intent_id> [--by name] [--note text]
   pursestring log [-n 20]          Show the latest decision-log entries
+  pursestring verify-log           Check the decision log's hash chain; exits 1 and names the first
+                                bad line if an entry was edited, deleted, inserted or reordered
   pursestring simulate-charge <intent_id> <amount> [--merchant "PDFOCR.IO"]
                                 Pretend the merchant charged the intent's card and show the
                                 real-time authorization decision (works with the mock rail)
@@ -51,7 +53,9 @@ Environment:
   PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
                           PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
-  PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API, and the password on the OAuth consent page
+  PURSESTRING_AUDIT_KEY   Secret that turns the decision log's hash chain into an HMAC chain, so someone who can
+                          edit the file can't recompute the hashes. Needed again to verify.
+  PURSESTRING_ADMIN_TOKEN Bearer token for the HTTP approval API and GET /audit/verify, and the password on the OAuth consent page
   PURSESTRING_PUBLIC_URL  Public https address of this server; turns on OAuth sign-in for ChatGPT and claude.ai
 `;
 
@@ -182,6 +186,18 @@ async function main() {
       const { store } = build();
       for (const e of store.readAudit(Number(values.n ?? 20))) console.log(JSON.stringify(e));
       return;
+    }
+    case "verify-log": {
+      const { store } = build();
+      const r = store.verifyAudit();
+      const signed = r.mode === "hmac" ? " (HMAC)" : "";
+      if (r.ok) {
+        const legacy = r.legacy_entries ? `, plus ${r.legacy_entries} older unchained entries` : "";
+        console.log(`OK: ${r.entries - r.legacy_entries} chained entries${signed}${legacy}. Head: ${r.head ?? "(empty)"}`);
+        return;
+      }
+      console.error(`BROKEN at line ${r.broken_at!.line}${r.broken_at!.seq ? ` (seq ${r.broken_at!.seq})` : ""}: ${r.broken_at!.reason}`);
+      process.exit(1);
     }
     case "policy": {
       const { config } = build();

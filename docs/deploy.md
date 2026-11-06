@@ -278,6 +278,7 @@ Refunds in the demo always go to a built-in stand-in for PayPal's MCP server wit
 - [ ] Keep `vendors.allowlist` short and `auto_approve.max_amount` low. Widen them once the audit log shows what your agents actually buy.
 - [ ] Set `PURSESTRING_TOKEN` and `PURSESTRING_ADMIN_TOKEN` to long random values, and serve HTTP only behind TLS.
 - [ ] Back up the `/data` volume. `decisions.jsonl` is your audit trail.
+- [ ] Set `PURSESTRING_AUDIT_KEY` (kept outside `/data`) so the audit trail is HMAC-chained, and run `pursestring verify-log` after restoring a backup.
 - [ ] Run one PurseString instance per state directory. Several processes on one machine can share it safely (writes are locked), but don't put it on a network file system shared between hosts.
 - [ ] Keep payment keys in your secret manager, not in `policies.yaml`.
 
