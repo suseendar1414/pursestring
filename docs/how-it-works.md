@@ -78,6 +78,25 @@ sequenceDiagram
 
 Decisions are local (one locked JSON read) and take a few milliseconds, well inside Lithic's 6-second limit. Requests must carry a valid [Standard Webhooks](https://www.standardwebhooks.com) signature made with your Lithic ASA HMAC key (`LITHIC_WEBHOOK_SECRET`). Other rails can call the generic `POST /jit/authorize` with the admin token. To try it locally on the mock rail: `pursestring simulate-charge <intent_id> <amount>`.
 
+## Holds and captures
+
+An approved authorization is a hold, not a charge. Lithic later reports what happened to it on the same transaction (the ASA request's `token`), and PurseString applies those events to the hold it approved:
+
+| Lithic event | What PurseString does |
+|---|---|
+| `CLEARING`, `FINANCIAL_AUTHORIZATION` | Records what was captured and ends the hold. A capture smaller than the hold frees the difference; a bigger one (a tip) counts what was really taken. |
+| `AUTHORIZATION_REVERSAL`, `VOID` | Frees that much of the hold, or all of it when the event has no amount. |
+| `AUTHORIZATION_EXPIRY` | Frees whatever is still held. |
+
+What that changes:
+
+- **Recurring cards** are capped on what was captured plus what is still held, so a released hold or a smaller capture gives room back under the monthly cap.
+- **Single-use cards** are used up by a hold that's still open or captured, not by one the merchant released, so a hotel or gas station that drops a hold and places a new one isn't refused by PurseString. Lithic's own `SINGLE_USE` cards close at the issuer after their first approved authorization, so on Lithic the issuer may still decline that second hold.
+- **The daily budget** reserves a single-use card's limit until its charge is captured, then counts what was captured. Recurring cards keep their limit reserved, since they can still renew.
+- **Refunds** are checked against what was captured, not the hold.
+
+Events arrive on `POST /webhooks/lithic` with refunds (same subscription, same `LITHIC_EVENTS_SECRET`). Each event's ID is applied once, so Lithic re-sending the whole event list is harmless. An event for a hold PurseString didn't approve is logged as `settlement_unmatched` and changes nothing. Other rails, or a person, can call `POST /settlements` with the admin token: `{"event_id": "...", "kind": "capture", "amount": 12.00, "transaction_id": "..."}` (`kind` is `capture` or `release`; `card_token` works instead of `transaction_id` when the card has exactly one open hold). Pass `transaction_id` to `POST /jit/authorize` so later events can find the hold.
+
 ## Short-lived cards
 
 Single-use cards close `cards.ttl_minutes` (default 10) after issue. JIT authorization declines them from that moment, `request_ephemeral_card` stops replaying them, and a background sweep closes them at the rail. Approved subscriptions get a merchant-locked card with a monthly cap instead, since they have to keep renewing.
@@ -196,6 +215,7 @@ interface CardAdapter {
 | `src/governance.ts` | The control plane: submit, dedupe, issue, replay, approve |
 | `src/policy.ts` | Pure rule evaluation, rail routing and domain matching |
 | `src/store.ts` | Locked JSON state, idempotency key, audit log |
+| `src/holds.ts` | What a hold costs once it is captured, partly captured or released |
 | `src/notify.ts` | Slack and Discord webhooks |
 | `src/adapters/` | Payment rails (`planned.ts` holds the not-yet-built ones) |
 | `src/webhooks.ts` | Standard Webhooks signature verification for issuer callbacks |
