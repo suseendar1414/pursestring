@@ -13,20 +13,24 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { formatMajor, toMajor, toMinor } from "./money.js";
 import { normalizeDomain } from "./policy.js";
 import type { IntentRecord, PurchaseIntent } from "./types.js";
 
 /**
  * Deterministic idempotency key: SHA256(agent_id | task_id | vendor | amount).
  * Fields are joined with a separator so "a"+"bc" and "ab"+"c" never collide,
- * the vendor is normalized and the amount is fixed to cents.
+ * the vendor is normalized and the amount is written with the currency's own decimals ("15.00" USD, "1500" JPY,
+ * "1.234" KWD), so two amounts that differ by one minor unit never share a key.
  */
-export function idempotencyKey(intent: Pick<PurchaseIntent, "agent_id" | "task_id" | "vendor_domain" | "amount">): string {
+export function idempotencyKey(
+  intent: Pick<PurchaseIntent, "agent_id" | "task_id" | "vendor_domain" | "amount"> & { currency?: string },
+): string {
   const parts = [
     intent.agent_id.trim(),
     intent.task_id.trim(),
     normalizeDomain(intent.vendor_domain),
-    intent.amount.toFixed(2),
+    formatMajor(intent.amount, intent.currency ?? "USD"),
   ];
   return createHash("sha256").update(parts.join("\u001f")).digest("hex");
 }
@@ -274,16 +278,18 @@ export class Store {
 
 /**
  * Total an agent has spent since 00:00 UTC: card spend limits issued (less what merchants refunded on those cards),
- * payouts sent and PayPal refunds made through governed tools.
+ * payouts sent and PayPal refunds made through governed tools. Summed in whole minor units of `currency`, so a
+ * hundred 0.10 spends come to exactly 10.00. Returns major units.
  */
-export function spentToday(intents: Record<string, IntentRecord>, agentId: string, now: Date): number {
+export function spentToday(intents: Record<string, IntentRecord>, agentId: string, now: Date, currency = "USD"): number {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const m = (n: number) => toMinor(n, currency);
   let sum = 0;
   for (const r of Object.values(intents)) {
     if (r.intent.agent_id !== agentId) continue;
-    if (r.card && new Date(r.card.issued_at) >= dayStart) sum += Math.max(0, r.card.spend_limit - (r.refunded_total ?? 0));
-    if (r.payment && new Date(r.payment.sent_at) >= dayStart) sum += r.payment.amount;
-    if (r.action?.executed_at && !r.action.is_error && new Date(r.action.executed_at) >= dayStart) sum += r.intent.amount;
+    if (r.card && new Date(r.card.issued_at) >= dayStart) sum += Math.max(0, m(r.card.spend_limit) - m(r.refunded_total ?? 0));
+    if (r.payment && new Date(r.payment.sent_at) >= dayStart) sum += m(r.payment.amount);
+    if (r.action?.executed_at && !r.action.is_error && new Date(r.action.executed_at) >= dayStart) sum += m(r.intent.amount);
   }
-  return sum;
+  return toMajor(sum, currency);
 }

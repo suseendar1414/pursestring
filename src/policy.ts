@@ -1,4 +1,5 @@
 import type { Policy } from "./config.js";
+import { formatMinor, toMinor } from "./money.js";
 import type { Decision, PolicyEvaluation, PurchaseIntent, RuleResult } from "./types.js";
 
 /** Lowercase a vendor string and strip scheme, credentials, port, path and a leading "www.". */
@@ -29,7 +30,8 @@ export function isBlocklisted(policy: Policy, domain: string): boolean {
   return policy.vendors.blocklist.some((p) => domainMatches(domain, p));
 }
 
-const fmt = (n: number, c: string) => `${n.toFixed(2)} ${c}`;
+/** Minor units -> "49.99 USD". */
+const fmt = (minor: number, c: string) => `${formatMinor(minor, c)} ${c}`;
 
 /**
  * Evaluate an intent against the policy. Pure: everything it needs is passed in,
@@ -44,15 +46,22 @@ export function evaluate(
   const add = (rule: string, passed: boolean, effect: Decision, detail: string) =>
     rules.push({ rule, passed, effect, detail });
   const cur = policy.currency;
-  const amt = intent.amount;
+  // Every comparison below is between whole minor units of the policy currency (cents for USD), so it is exact.
+  const m = (major: number) => toMinor(major, cur);
+  const amt = m(intent.amount);
+  const spent = m(ctx.spentTodayByAgent);
+  const hardMax = m(policy.hard_limits.max_amount);
+  const approvalOver = m(policy.require_approval.over_amount);
+  const budget = m(policy.hard_limits.per_agent_daily_budget);
+  const autoMax = m(policy.auto_approve.max_amount);
   const allowlisted = isAllowlisted(policy, intent.vendor_domain);
 
   // Hard refusals: no human can approve these.
   add(
     "hard_limits.max_amount",
-    amt <= policy.hard_limits.max_amount,
+    amt <= hardMax,
     "deny",
-    `${fmt(amt, cur)} vs hard cap ${fmt(policy.hard_limits.max_amount, cur)}`,
+    `${fmt(amt, cur)} vs hard cap ${fmt(hardMax, cur)}`,
   );
   add(
     "vendors.blocklist",
@@ -96,9 +105,9 @@ export function evaluate(
   }
   add(
     "require_approval.over_amount",
-    amt <= policy.require_approval.over_amount,
+    amt <= approvalOver,
     "require_approval",
-    `${fmt(amt, cur)} vs approval threshold ${fmt(policy.require_approval.over_amount, cur)}`,
+    `${fmt(amt, cur)} vs approval threshold ${fmt(approvalOver, cur)}`,
   );
   if (policy.require_approval.non_allowlisted_vendor) {
     add(
@@ -108,18 +117,18 @@ export function evaluate(
       `${normalizeDomain(intent.vendor_domain)} ${allowlisted ? "is" : "is not"} on the allowlist`,
     );
   }
-  const projected = ctx.spentTodayByAgent + amt;
+  const projected = spent + amt;
   add(
     "hard_limits.per_agent_daily_budget",
-    projected <= policy.hard_limits.per_agent_daily_budget,
+    projected <= budget,
     "require_approval",
-    `${intent.agent_id} has ${fmt(ctx.spentTodayByAgent, cur)} issued today; this makes ${fmt(projected, cur)} of ${fmt(policy.hard_limits.per_agent_daily_budget, cur)}`,
+    `${intent.agent_id} has ${fmt(spent, cur)} issued today; this makes ${fmt(projected, cur)} of ${fmt(budget, cur)}`,
   );
 
   // Auto-approve envelope: everything else must be small, one-off and known.
   const aa = policy.auto_approve;
   const autoOk =
-    amt < aa.max_amount &&
+    amt < autoMax &&
     (aa.allow_recurring || !intent.is_recurring) &&
     (!aa.require_allowlisted_vendor || allowlisted);
   add(
@@ -127,8 +136,8 @@ export function evaluate(
     autoOk,
     "require_approval",
     autoOk
-      ? `under ${fmt(aa.max_amount, cur)}, ${intent.is_recurring ? "recurring allowed" : "one-time"}, vendor ok`
-      : `auto-approve needs amount under ${fmt(aa.max_amount, cur)}` +
+      ? `under ${fmt(autoMax, cur)}, ${intent.is_recurring ? "recurring allowed" : "one-time"}, vendor ok`
+      : `auto-approve needs amount under ${fmt(autoMax, cur)}` +
           (aa.allow_recurring ? "" : ", one-time charge") +
           (aa.require_allowlisted_vendor ? ", allowlisted vendor" : ""),
   );
@@ -190,29 +199,33 @@ export function evaluateToolCall(
     add("paypal_tools.require_approval", false, "require_approval", `${tool} always needs a human`);
   }
   if (AMOUNT_TOOLS.has(tool)) {
-    const { amount, currency } = toolCallAmount(args);
-    if (amount === null) {
+    const { amount: major, currency } = toolCallAmount(args);
+    if (major === null) {
       add("paypal_tools.refunds.amount", false, "require_approval", "no amount given, so PayPal refunds the full capture");
     } else {
       if (currency) add("currency", currency === cur.toUpperCase(), "deny", `refund currency ${currency}, policy currency ${cur}`);
+      const m = (n: number) => toMinor(n, cur);
+      const amount = m(major);
+      const spent = m(ctx.spentTodayByAgent);
+      const budget = m(policy.hard_limits.per_agent_daily_budget);
       add(
         "paypal_tools.refunds.max_amount",
-        amount <= t.refunds.max_amount,
+        amount <= m(t.refunds.max_amount),
         "deny",
-        `${fmt(amount, cur)} vs refund cap ${fmt(t.refunds.max_amount, cur)}`,
+        `${fmt(amount, cur)} vs refund cap ${fmt(m(t.refunds.max_amount), cur)}`,
       );
       add(
         "paypal_tools.refunds.auto_approve_under",
-        amount < t.refunds.auto_approve_under,
+        amount < m(t.refunds.auto_approve_under),
         "require_approval",
-        `${fmt(amount, cur)} vs auto-approve limit ${fmt(t.refunds.auto_approve_under, cur)}`,
+        `${fmt(amount, cur)} vs auto-approve limit ${fmt(m(t.refunds.auto_approve_under), cur)}`,
       );
-      const projected = ctx.spentTodayByAgent + amount;
+      const projected = spent + amount;
       add(
         "hard_limits.per_agent_daily_budget",
-        projected <= policy.hard_limits.per_agent_daily_budget,
+        projected <= budget,
         "require_approval",
-        `${ctx.agentId} has ${fmt(ctx.spentTodayByAgent, cur)} out today; this makes ${fmt(projected, cur)} of ${fmt(policy.hard_limits.per_agent_daily_budget, cur)}`,
+        `${ctx.agentId} has ${fmt(spent, cur)} out today; this makes ${fmt(projected, cur)} of ${fmt(budget, cur)}`,
       );
     }
   }
@@ -221,10 +234,12 @@ export function evaluateToolCall(
 
 /** Choose the rail for a purchase: the first matching route in policies.yaml, else adapter.type. */
 export function routeRail(policy: Policy, intent: PurchaseIntent): { rail: string; route: number | null } {
+  const m = (n: number) => toMinor(n, policy.currency);
+  const amt = m(intent.amount);
   const i = policy.routes.findIndex(
     (r) =>
-      (r.min_amount === undefined || intent.amount >= r.min_amount) &&
-      (r.max_amount === undefined || intent.amount < r.max_amount) &&
+      (r.min_amount === undefined || amt >= m(r.min_amount)) &&
+      (r.max_amount === undefined || amt < m(r.max_amount)) &&
       (r.recurring === undefined || r.recurring === intent.is_recurring) &&
       (r.vendors === undefined || r.vendors.some((p) => domainMatches(intent.vendor_domain, p))),
   );

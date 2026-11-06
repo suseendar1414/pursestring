@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { IntentRecord, RefundRecord } from "./types.js";
+import { formatMajor, formatMoney } from "./money.js";
 import { signStandardWebhook } from "./webhooks.js";
 
 export interface ApprovalRequestExtras {
@@ -50,7 +51,9 @@ export function refundEventBody(n: RefundNotice) {
 }
 
 function refundLines(n: RefundNotice): { title: string; lines: string[] } {
-  const amt = `${n.refund.amount.toFixed(2)} ${n.refund.currency}`;
+  const cur = n.refund.currency;
+  const f = (major: number | undefined) => formatMajor(major ?? 0, cur);
+  const amt = formatMoney(n.refund.amount, cur);
   const r = n.record;
   if (n.outcome === "unmatched") {
     return {
@@ -64,7 +67,7 @@ function refundLines(n: RefundNotice): { title: string; lines: string[] } {
       title: `:mag: Refund needs a look: ${amt} at ${r!.intent.vendor_domain}`,
       lines: [
         who,
-        `It would take refunds past the ${n.charged?.toFixed(2)} charged (${(r!.refunded_total ?? 0).toFixed(2)} already refunded), so nothing was credited. Refund ${n.refund.refund_id}.`,
+        `It would take refunds past the ${f(n.charged)} charged (${f(r!.refunded_total)} already refunded), so nothing was credited. Refund ${n.refund.refund_id}.`,
       ],
     };
   }
@@ -72,8 +75,8 @@ function refundLines(n: RefundNotice): { title: string; lines: string[] } {
     title: `:money_with_wings: Refund ${amt} from ${r!.intent.vendor_domain}`,
     lines: [
       who,
-      `*Budget back:* ${amt}   *Refunded so far:* ${(r!.refunded_total ?? 0).toFixed(2)} of ${n.charged?.toFixed(2)} (${r!.refund_status === "refunded" ? "fully refunded" : "partial"})`,
-      `*Today's spend now:* ${(n.spent_today ?? 0).toFixed(2)} of ${n.daily_budget.toFixed(2)}`,
+      `*Budget back:* ${amt}   *Refunded so far:* ${f(r!.refunded_total)} of ${f(n.charged)} (${r!.refund_status === "refunded" ? "fully refunded" : "partial"})`,
+      `*Today's spend now:* ${f(n.spent_today)} of ${f(n.daily_budget)}`,
     ],
   };
 }
@@ -89,7 +92,7 @@ function summaryLines(rec: IntentRecord, code?: string): string[] {
   return [
     `*Agent:* ${i.agent_id}   *Task:* ${i.task_id}`,
     `*Goal:* ${i.task_goal}`,
-    `*Spend:* ${i.amount.toFixed(2)} ${i.currency} at ${i.vendor_domain}${i.is_recurring ? "  (RECURRING)" : ""}`,
+    `*Spend:* ${formatMoney(i.amount, i.currency)} at ${i.vendor_domain}${i.is_recurring ? "  (RECURRING)" : ""}`,
     `*Rail:* ${rec.rail}`,
     `*Alternatives tried:* ${i.alternatives_attempted.length ? i.alternatives_attempted.join("; ") : "none"}`,
     `*Why it needs you:* ${failed.map((r) => `${r.rule}: ${r.detail}`).join(" | ")}`,
@@ -128,7 +131,7 @@ export class WebhookNotifier implements Notifier {
 
   async approvalRequested(rec: IntentRecord, extras: ApprovalRequestExtras = {}): Promise<void> {
     const lines = summaryLines(rec, extras.code);
-    const title = `:rotating_light: Agent spend needs approval: ${rec.intent.amount.toFixed(2)} ${rec.intent.currency} at ${rec.intent.vendor_domain}`;
+    const title = `:rotating_light: Agent spend needs approval: ${formatMoney(rec.intent.amount, rec.intent.currency)} at ${rec.intent.vendor_domain}`;
     const jobs: Promise<void>[] = [];
     const { slackWebhookUrl, slackSigningSecret, discordWebhookUrl } = this.config.env;
     if (slackWebhookUrl) {

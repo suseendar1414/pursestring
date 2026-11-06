@@ -1,3 +1,4 @@
+import { toMinor } from "../money.js";
 import type { CardDetails, CardReference } from "../types.js";
 import type { CardAdapter, IssueCardRequest } from "./types.js";
 
@@ -63,14 +64,15 @@ export class LithicAdapter implements CardAdapter {
     };
   }
 
-  protected spendLimitCents(amount: number): number {
-    return Math.round(amount * 100);
+  /** Lithic takes spend limits in the currency's minor units (cents for USD). */
+  protected spendLimitCents(amount: number, currency: string): number {
+    return toMinor(amount, currency);
   }
 
   async issueCard(req: IssueCardRequest): Promise<CardDetails> {
     const card = await this.call<LithicCard>("POST", "/cards", {
       type: req.single_use ? "SINGLE_USE" : "MERCHANT_LOCKED",
-      spend_limit: this.spendLimitCents(req.amount),
+      spend_limit: this.spendLimitCents(req.amount, req.currency),
       spend_limit_duration: req.single_use ? "TRANSACTION" : "MONTHLY",
       memo: req.memo.slice(0, 100),
     });

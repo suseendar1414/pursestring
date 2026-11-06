@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Governance, GovernanceError } from "./governance.js";
+import { formatMoney } from "./money.js";
 import type { Upstream } from "./paypal-mcp.js";
 import { isGovernedTool } from "./policy.js";
 import { PurchaseIntentSchema, PurchaseIntentShape, type IntentRecord } from "./types.js";
@@ -319,7 +320,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
           replayed,
           note: replayed
             ? "Duplicate prevented: this intent was already paid. No money moved."
-            : `Sent ${payment.amount.toFixed(2)} ${payment.currency} to ${record.intent.vendor_domain} via ${payment.adapter}.`,
+            : `Sent ${formatMoney(payment.amount, payment.currency)} to ${record.intent.vendor_domain} via ${payment.adapter}.`,
           payment: {
             payment_id: payment.payment_id,
             status: payment.status,

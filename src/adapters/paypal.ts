@@ -1,3 +1,4 @@
+import { formatMinor, toMinor } from "../money.js";
 import type { CardDetails } from "../types.js";
 import type { CardAdapter, PayoutRequest, PayoutResult } from "./types.js";
 
@@ -73,7 +74,9 @@ export class PayPalAdapter implements CardAdapter {
   }
 
   async sendPayout(req: PayoutRequest): Promise<PayoutResult> {
-    const value = req.amount.toFixed(ZERO_DECIMAL.has(req.currency.toUpperCase()) ? 0 : 2);
+    const cur = req.currency.toUpperCase();
+    // PayPal wants the currency's own decimals ("49.99", "1500"), except HUF and TWD, which it takes as whole units.
+    const value = ZERO_DECIMAL.has(cur) ? String(Math.round(req.amount)) : formatMinor(toMinor(req.amount, cur), cur);
     const batch = await this.call<PayoutBatch>(
       "POST",
       "/v1/payments/payouts",
