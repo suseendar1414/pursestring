@@ -225,7 +225,7 @@ With Auth Stream Access, Lithic asks PurseString to approve every charge on its 
 3. Fetch your ASA HMAC secret from Lithic's "retrieve ASA HMAC secret" endpoint and set it as `LITHIC_WEBHOOK_SECRET`. Requests without a valid signature get `401`, and the endpoint stays off (`503`) until the secret is set.
 4. Use Lithic's sandbox transaction simulator to send an authorization and watch `pursestring log` for a `jit_authorization` entry.
 
-5. For refunds, add a Lithic event subscription for transaction events pointing at `https://<your-host>/webhooks/lithic`, and set its secret as `LITHIC_EVENTS_SECRET`. See [how-it-works.md](how-it-works.md#refunds).
+5. For refunds, captures and released holds, add a Lithic event subscription for transaction events pointing at `https://<your-host>/webhooks/lithic`, and set its secret as `LITHIC_EVENTS_SECRET`. See [how-it-works.md](how-it-works.md#refunds) and [holds and captures](how-it-works.md#holds-and-captures).
 
 To try the logic without Lithic, use the mock rail: `pursestring simulate-charge <intent_id> 15 --merchant "PDFOCR.IO"`.
 
@@ -264,7 +264,7 @@ Refunds in the demo always go to a built-in stand-in for PayPal's MCP server wit
 | `DISCORD_WEBHOOK_URL` | unset | Discord approval requests |
 | `LITHIC_API_KEY` | unset | Use Lithic cards |
 | `LITHIC_WEBHOOK_SECRET` | unset | Lithic ASA HMAC key; enables real-time authorization at `/jit/lithic` |
-| `LITHIC_EVENTS_SECRET` | unset | Lithic event subscription secret; enables refunds at `/webhooks/lithic` |
+| `LITHIC_EVENTS_SECRET` | unset | Lithic event subscription secret; enables refunds, captures and released holds at `/webhooks/lithic` |
 | `REFUND_WEBHOOK_URL` | unset | Your own URL to receive signed `intent.refunded` events |
 | `REFUND_WEBHOOK_SECRET` | unset | Signs the events sent to `REFUND_WEBHOOK_URL` (Standard Webhooks) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | unset | PayPal payouts and governing PayPal's MCP server. See [paypal.md](paypal.md) |

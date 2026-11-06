@@ -5,6 +5,7 @@ import type { Notifier, RefundNotice } from "./notify.js";
 import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel } from "./policy.js";
 import { createHash } from "node:crypto";
 import { exponent, formatMinor, isWholeMinor, toMajor, toMinor } from "./money.js";
+import { cardCostMinor, holdStatus, openHoldMinor, usedMinor } from "./holds.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
 import type {
   ActionRecord,
@@ -104,6 +105,8 @@ export interface AuthorizationRequest {
   /** The issuer's stable ID for the merchant (Lithic acceptor_id). */
   merchant_id?: string;
   mcc?: string;
+  /** The issuer's ID for this transaction, so later capture and reversal events can find the hold. */
+  transaction_id?: string;
 }
 
 export type AuthorizationCode =
@@ -151,18 +154,55 @@ export interface RefundResult {
   refund_status?: RefundStatus;
 }
 
+/** What the card issuer says happened to a hold PurseString approved: captured (cleared) or released (reversed, voided, expired). */
+export interface SettlementInput {
+  /** The issuer's ID for this event. Repeats of the same ID are ignored. */
+  event_id: string;
+  kind: "capture" | "release";
+  /** The transaction the hold belongs to (what `authorize` got as transaction_id). */
+  transaction_id?: string;
+  /** Used to find the hold when the transaction ID is unknown: works when the card has exactly one open hold. */
+  card_token?: string;
+  /** Major units, positive. Leave it out on a release to release the whole remaining hold. */
+  amount?: number;
+  currency?: string;
+  /** The issuer's event type, for the audit log, e.g. CLEARING. */
+  type?: string;
+  source: string;
+}
+
+/**
+ * captured / released: applied. duplicate: this event_id was already applied.
+ * unmatched: no approved hold matches, so nothing changed and a human may want to look.
+ */
+export type SettlementOutcome = "captured" | "released" | "duplicate" | "unmatched";
+
+export interface SettlementResult {
+  outcome: SettlementOutcome;
+  message: string;
+  intent_id?: string;
+  hold_status?: "held" | "captured" | "released";
+  /** Totals on the hold after this event, in major units. */
+  captured?: number;
+  released?: number;
+  still_held?: number;
+}
+
 /** The currency an intent's money moved in: its card's, else what the agent asked for. */
 const recordCurrency = (rec: IntentRecord) => rec.card?.currency ?? rec.intent.currency;
 
-/** What was actually charged on an intent's card, in minor units: approved real-time authorizations, else the card's limit. */
+/**
+ * What was actually charged on an intent's card, in minor units: for approved real-time authorizations, what was
+ * captured plus what is still held (a released hold counts nothing); without them, what the card has cost.
+ */
 function chargedMinor(rec: IntentRecord): number {
   const cur = recordCurrency(rec);
   const approved = (rec.authorizations ?? []).filter((a) => a.approved);
-  if (approved.length) return approved.reduce((sum, a) => sum + toMinor(a.amount, cur), 0);
-  return toMinor(rec.card?.spend_limit ?? 0, cur);
+  if (approved.length) return approved.reduce((sum, a) => sum + usedMinor(a, cur), 0);
+  return cardCostMinor(rec);
 }
 
-/** What was actually charged on an intent's card: approved real-time authorizations, else the card's limit. */
+/** What was actually charged on an intent's card: captured or still held on approved authorizations, else the card's limit. */
 export function chargedAmount(rec: IntentRecord): number {
   return toMajor(chargedMinor(rec), recordCurrency(rec));
 }
@@ -790,8 +830,10 @@ export class Governance {
             merchant: req.merchant,
             ...(req.merchant_id ? { merchant_id: req.merchant_id } : {}),
             ...(req.mcc ? { mcc: req.mcc } : {}),
+            ...(req.transaction_id ? { transaction_id: req.transaction_id } : {}),
             approved: code === "approved",
             reason,
+            ...(code === "approved" ? { hold_status: "held" as const } : {}),
           };
           (rec.authorizations ??= []).push(entry);
         }
@@ -814,15 +856,17 @@ export class Governance {
       const cap = limit + Math.floor((limit * toleranceBp) / 10_000);
       const amount = toMinor(req.amount, cur);
       if (card.single_use) {
-        if (approvedBefore.length > 0) return decide("already_used", "Single-use card was already charged once.");
+        // A hold the merchant released (a hotel or gas station re-authorizing, say) doesn't use the card up.
+        if (approvedBefore.some((a) => usedMinor(a, cur) > 0)) return decide("already_used", "Single-use card was already charged once.");
         if (amount > cap) {
           return decide("over_amount", `${fmt(amount)} is over the approved ${fmt(limit)} ${cur}.`);
         }
       } else {
         const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+        // Captured amounts plus holds still open. A released hold gives its room back; a smaller capture frees the rest.
         const spentThisMonth = approvedBefore
           .filter((a) => new Date(a.ts) >= monthStart)
-          .reduce((sum, a) => sum + toMinor(a.amount, cur), 0);
+          .reduce((sum, a) => sum + usedMinor(a, cur), 0);
         if (spentThisMonth + amount > cap) {
           return decide(
             "over_amount",
@@ -852,8 +896,108 @@ export class Governance {
       return decide("approved", "Matches the approved intent.");
     });
     const decision = { ...result, latency_ms: Math.round((performance.now() - t0) * 100) / 100 };
-    this.store.audit("jit_authorization", { ...decision, card_token: req.card_token, amount: req.amount, merchant: req.merchant, mcc: req.mcc });
+    this.store.audit("jit_authorization", {
+      ...decision,
+      card_token: req.card_token,
+      transaction_id: req.transaction_id,
+      amount: req.amount,
+      merchant: req.merchant,
+      mcc: req.mcc,
+    });
     return decision;
+  }
+
+  /**
+   * Apply what the issuer reports about a hold PurseString approved. A capture records what the merchant actually
+   * took and ends the hold, so a capture smaller than the hold frees the difference. A release (reversal, void,
+   * expiry) frees part or all of the hold, and a single-use card whose only hold was released can be authorized again.
+   * Safe to call with the same event twice: the second call is a no-op.
+   */
+  recordSettlement(input: SettlementInput): SettlementResult {
+    if (!input.event_id || (input.kind !== "capture" && input.kind !== "release")) {
+      throw new GovernanceError("A settlement needs an event_id and a kind of capture or release.", "bad_settlement");
+    }
+    if (input.amount !== undefined && (!Number.isFinite(input.amount) || input.amount < 0)) {
+      throw new GovernanceError("A settlement amount must be zero or more.", "bad_settlement");
+    }
+    if (input.kind === "capture" && input.amount === undefined) {
+      throw new GovernanceError("A capture needs an amount.", "bad_settlement");
+    }
+    const result = this.store.transact((intents, now): SettlementResult => {
+      let rec: IntentRecord | undefined;
+      let auth: AuthorizationRecord | undefined;
+      if (input.transaction_id) {
+        for (const r of Object.values(intents)) {
+          auth = r.authorizations?.find((a) => a.approved && a.transaction_id === input.transaction_id);
+          if (auth) {
+            rec = r;
+            break;
+          }
+        }
+      }
+      if (!auth && input.card_token) {
+        // No transaction ID on file (a rail without one, or a hold approved before this was tracked): fall back to the
+        // card, but only when exactly one approved hold on it is still open, so an event can't land on the wrong charge.
+        const r = Object.values(intents).find((x) => x.card?.token === input.card_token);
+        const open = (r?.authorizations ?? []).filter(
+          (a) => a.approved && !a.transaction_id && openHoldMinor(a, recordCurrency(r!)) > 0,
+        );
+        if (r && open.length === 1) {
+          rec = r;
+          auth = open[0];
+        }
+      }
+      if (!rec || !auth) {
+        return { outcome: "unmatched", message: "No approved hold matches this event, so nothing changed." };
+      }
+      const cur = recordCurrency(rec);
+      const fmt = (minor: number) => `${formatMinor(minor, cur)} ${cur}`;
+      const totals = (): Omit<SettlementResult, "outcome" | "message"> => ({
+        intent_id: rec!.intent_id,
+        hold_status: holdStatus(auth!, cur),
+        captured: toMajor(toMinor(auth!.captured ?? 0, cur), cur),
+        released: toMajor(toMinor(auth!.released ?? 0, cur), cur),
+        still_held: toMajor(openHoldMinor(auth!, cur), cur),
+      });
+      if ((auth.event_ids ?? []).includes(input.event_id)) {
+        return { outcome: "duplicate", message: `Event ${input.event_id} was already applied on ${rec.intent_id}.`, ...totals() };
+      }
+      auth.event_ids = [...(auth.event_ids ?? []), input.event_id];
+      let message: string;
+      if (input.kind === "capture") {
+        const amountMinor = toMinor(input.amount!, cur);
+        const heldMinor = openHoldMinor(auth, cur);
+        auth.captured = toMajor(toMinor(auth.captured ?? 0, cur) + amountMinor, cur);
+        auth.settled_at ??= now.toISOString();
+        message =
+          heldMinor > amountMinor
+            ? `Captured ${fmt(amountMinor)} of a ${fmt(heldMinor)} hold; the other ${fmt(heldMinor - amountMinor)} no longer counts.`
+            : `Captured ${fmt(amountMinor)}.`;
+      } else {
+        const openMinor = openHoldMinor(auth, cur);
+        const amountMinor = input.amount === undefined ? openMinor : Math.min(openMinor, toMinor(input.amount, cur));
+        auth.released = toMajor(toMinor(auth.released ?? 0, cur) + amountMinor, cur);
+        message = `Released ${fmt(amountMinor)}; ${fmt(openMinor - amountMinor)} still held.`;
+      }
+      auth.hold_status = holdStatus(auth, cur);
+      rec.updated_at = now.toISOString();
+      return { outcome: input.kind === "capture" ? "captured" : "released", message, ...totals() };
+    });
+    this.store.audit(result.outcome === "duplicate" || result.outcome === "unmatched" ? `settlement_${result.outcome}` : `hold_${result.outcome}`, {
+      intent_id: result.intent_id,
+      event_id: input.event_id,
+      type: input.type,
+      transaction_id: input.transaction_id,
+      card_token: input.card_token,
+      amount: input.amount,
+      currency: input.currency,
+      source: input.source,
+      hold_status: result.hold_status,
+      captured: result.captured,
+      released: result.released,
+      still_held: result.still_held,
+    });
+    return result;
   }
 
   /**

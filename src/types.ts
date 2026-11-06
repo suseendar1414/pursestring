@@ -112,6 +112,18 @@ export interface AuthorizationRecord {
   mcc?: string;
   approved: boolean;
   reason: string;
+  /** The issuer's ID for the transaction (Lithic's ASA `token`), so later capture and reversal events find this hold. */
+  transaction_id?: string;
+  /** Captured by the merchant so far, in major units. Can be less than `amount` (partial capture) or more (tips). */
+  captured?: number;
+  /** Released without being captured (reversal, void, or the hold expiring), in major units. */
+  released?: number;
+  /** When the first capture landed. Capture ends the hold: anything not captured stops counting. */
+  settled_at?: string;
+  /** held, captured or released. Updated by issuer events. */
+  hold_status?: "held" | "captured" | "released";
+  /** Issuer event IDs already applied, so a retried webhook never counts twice. */
+  event_ids?: string[];
 }
 
 /** What we persist about an issued card. Never the PAN or CVV. */

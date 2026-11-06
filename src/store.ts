@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { cardCostMinor } from "./holds.js";
 import { formatMajor, toMajor, toMinor } from "./money.js";
 import { normalizeDomain } from "./policy.js";
 import type { IntentRecord, PurchaseIntent } from "./types.js";
@@ -277,7 +278,8 @@ export class Store {
 }
 
 /**
- * Total an agent has spent since 00:00 UTC: card spend limits issued (less what merchants refunded on those cards),
+ * Total an agent has spent since 00:00 UTC: card spend limits issued, or what was captured once a single-use card's
+ * charge settles (less what merchants refunded on those cards),
  * payouts sent and PayPal refunds made through governed tools. Summed in whole minor units of `currency`, so a
  * hundred 0.10 spends come to exactly 10.00. Returns major units.
  */
@@ -287,7 +289,10 @@ export function spentToday(intents: Record<string, IntentRecord>, agentId: strin
   let sum = 0;
   for (const r of Object.values(intents)) {
     if (r.intent.agent_id !== agentId) continue;
-    if (r.card && new Date(r.card.issued_at) >= dayStart) sum += Math.max(0, m(r.card.spend_limit) - m(r.refunded_total ?? 0));
+    if (r.card && new Date(r.card.issued_at) >= dayStart) {
+      const cost = m(toMajor(cardCostMinor(r), r.card.currency));
+      sum += Math.max(0, cost - m(r.refunded_total ?? 0));
+    }
     if (r.payment && new Date(r.payment.sent_at) >= dayStart) sum += m(r.payment.amount);
     if (r.action?.executed_at && !r.action.is_error && new Date(r.action.executed_at) >= dayStart) sum += m(r.intent.amount);
   }

@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { verifySlackSignature } from "./approvals.js";
-import { Governance, GovernanceError, type AuthorizationCode } from "./governance.js";
-import { formatMoney } from "./money.js";
+import { Governance, GovernanceError, type AuthorizationCode, type SettlementInput } from "./governance.js";
+import { formatMoney, toMajor } from "./money.js";
 import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
 import { handleDemo, type Demo } from "./demo.js";
@@ -59,6 +59,31 @@ interface LithicTransaction {
 /** Lithic event types that mean money came back to the card. Settled returns only: a credit authorization can still fall through. */
 const LITHIC_REFUND_EVENTS = new Set(["RETURN"]);
 
+/** Lithic event types that settle a hold: the merchant took the money. */
+const LITHIC_CAPTURE_EVENTS = new Set(["CLEARING", "FINANCIAL_AUTHORIZATION"]);
+/** Lithic event types that release a hold without capturing it. Expiry and an amountless event release all that's left. */
+const LITHIC_RELEASE_EVENTS = new Set(["AUTHORIZATION_REVERSAL", "AUTHORIZATION_EXPIRY", "VOID"]);
+
+/**
+ * Pull capture and release events out of a Lithic transaction webhook. The transaction token is the same `token` the
+ * ASA request carried, which is how a capture finds the hold PurseString approved.
+ */
+export function lithicSettlements(body: Record<string, unknown>): SettlementInput[] {
+  const tx = (body.payload ?? body.data ?? body) as LithicTransaction;
+  const currency = tx.currency ?? tx.merchant_currency ?? "USD";
+  const out: SettlementInput[] = [];
+  for (const e of tx.events ?? []) {
+    if (!e.type || !e.token || (e.result ?? "APPROVED") !== "APPROVED") continue;
+    const amount = typeof e.amount === "number" ? toMajor(Math.abs(e.amount), currency) : undefined;
+    const base = { event_id: e.token, transaction_id: tx.token, card_token: tx.card_token, currency, type: e.type, source: "lithic" };
+    if (LITHIC_CAPTURE_EVENTS.has(e.type) && amount !== undefined) out.push({ ...base, kind: "capture", amount });
+    else if (LITHIC_RELEASE_EVENTS.has(e.type)) {
+      out.push({ ...base, kind: "release", ...(e.type === "AUTHORIZATION_EXPIRY" || amount === undefined ? {} : { amount }) });
+    }
+  }
+  return out;
+}
+
 /** Pull refund events out of a Lithic webhook, whatever the envelope (payload, data, or the transaction itself). */
 export function lithicRefunds(body: Record<string, unknown>) {
   const tx = (body.payload ?? body.data ?? body) as LithicTransaction;
@@ -112,8 +137,9 @@ function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
  *   GET  /intents?status=pending_approval   list intents          (admin token)
  *   POST /intents/:id/approve|deny     human decision             (admin token)
  *   POST /jit/lithic                   Lithic Auth Stream Access   (LITHIC_WEBHOOK_SECRET signature)
- *   POST /webhooks/lithic              Lithic events: merchant refunds (LITHIC_EVENTS_SECRET signature)
+ *   POST /webhooks/lithic              Lithic events: refunds, captures, reversals (LITHIC_EVENTS_SECRET signature)
  *   POST /refunds                      record a refund by hand or from another rail (admin token)
+ *   POST /settlements                  record a capture or released hold from another rail (admin token)
  *   POST /slack/actions                Slack Approve/Deny buttons  (SLACK_SIGNING_SECRET signature)
  *   POST /jit/authorize                generic real-time authorization for other rails (admin token)
  *   /.well-known/*, /oauth/*           OAuth sign-in for remote MCP clients (when PURSESTRING_PUBLIC_URL is set)
@@ -181,6 +207,8 @@ export function startHttp(
           merchant: body.merchant?.descriptor ?? "",
           merchant_id: body.merchant?.acceptor_id,
           mcc: body.merchant?.mcc,
+          // Lithic's ASA token is the transaction token; its capture and reversal events carry it too.
+          transaction_id: body.token,
         });
         return send(res, 200, { token: body.token, result: LITHIC_RESULT[decision.code] });
       }
@@ -190,11 +218,17 @@ export function startHttp(
         if (!secret) return send(res, 503, { error: "set LITHIC_EVENTS_SECRET (your Lithic event subscription secret) to enable /webhooks/lithic" });
         const raw = await readRaw(req);
         if (!verifyStandardWebhook(secret, req.headers, raw)) return send(res, 401, { error: "bad signature" });
-        const refunds = lithicRefunds(JSON.parse(raw) as Record<string, unknown>);
+        const event = JSON.parse(raw) as Record<string, unknown>;
         const results = [];
-        for (const r of refunds) results.push(await gov.recordRefund(r));
+        for (const r of lithicRefunds(event)) results.push(await gov.recordRefund(r));
+        // Captures and releases are applied in the order Lithic lists them, so a clearing after a partial reversal sees the right hold.
+        const settlements = lithicSettlements(event).map((s) => gov.recordSettlement(s));
         // Always 200 on a verified event: an unmatched refund is for a human, and a retry wouldn't change the answer.
-        return send(res, 200, { received: true, refunds: results.map(({ outcome, intent_id, credited }) => ({ outcome, intent_id, credited })) });
+        return send(res, 200, {
+          received: true,
+          refunds: results.map(({ outcome, intent_id, credited }) => ({ outcome, intent_id, credited })),
+          settlements: settlements.map(({ outcome, intent_id, hold_status }) => ({ outcome, intent_id, hold_status })),
+        });
       }
 
       if (url.pathname === "/refunds" && req.method === "POST") {
@@ -219,6 +253,27 @@ export function startHttp(
           intent_id: body.intent_id,
           card_token: body.card_token,
           merchant: body.merchant,
+          source: "http",
+        });
+        return send(res, 200, result);
+      }
+
+      if (url.pathname === "/settlements" && req.method === "POST") {
+        if (!bearerOk(req, adminToken)) {
+          return send(res, 401, { error: adminToken ? "unauthorized" : "set PURSESTRING_ADMIN_TOKEN to enable the settlements API" });
+        }
+        const body = ((await readJson(req)) ?? {}) as Partial<SettlementInput>;
+        if (!body.event_id || (body.kind !== "capture" && body.kind !== "release") || (!body.transaction_id && !body.card_token)) {
+          return send(res, 400, { error: "event_id, kind (capture or release) and transaction_id or card_token are required" });
+        }
+        const result = gov.recordSettlement({
+          event_id: body.event_id,
+          kind: body.kind,
+          transaction_id: body.transaction_id,
+          card_token: body.card_token,
+          amount: body.amount,
+          currency: body.currency,
+          type: body.type,
           source: "http",
         });
         return send(res, 200, result);
@@ -268,6 +323,7 @@ export function startHttp(
           merchant?: string;
           merchant_id?: string;
           mcc?: string;
+          transaction_id?: string;
         };
         if (!body.card_token || typeof body.amount !== "number") {
           return send(res, 400, { error: "card_token and amount (major units) are required" });
@@ -278,6 +334,7 @@ export function startHttp(
           merchant: body.merchant ?? "",
           merchant_id: body.merchant_id,
           mcc: body.mcc,
+          transaction_id: body.transaction_id,
         });
         return send(res, 200, decision);
       }
