@@ -148,11 +148,29 @@ An `intent_submitted` entry carries the full reasoning tree:
     "summary": "Needs human approval: require_approval.recurring (recurring charge: will renew until cancelled)"
   },
   "status": "pending_approval",
-  "policy_file": "/home/me/project/policies.yaml"
+  "policy_file": "/home/me/project/policies.yaml",
+  "seq": 2,
+  "prev": "sha256:0870ce5a…",
+  "hash": "sha256:a68bc3e0…"
 }
 ```
 
 Card events record the rail, the card token and the last four digits. Full card numbers and CVVs are never written to the log or to `state.json`.
+
+### Tamper evidence
+
+Every entry is hash-chained. `seq` counts up from 1, `prev` is the previous entry's `hash`, and `hash` is SHA-256 over the exact line without the `hash` field. Edit, delete, insert or reorder a line and the chain breaks there:
+
+```
+$ pursestring verify-log
+BROKEN at line 2 (seq 2): hash mismatch: entry was edited
+```
+
+`pursestring verify-log` exits 1 on a break. Over HTTP, `GET /audit/verify` with the admin token returns the same report (409 when broken).
+
+Plain SHA-256 catches edits, but anyone who can write the file can rebuild the whole chain. Set `PURSESTRING_AUDIT_KEY` to a secret kept away from the data volume and entries are HMAC-SHA256 instead, so the chain can't be rebuilt without the key. The key is needed again to verify. You can turn a key on for an existing log; the first keyed entry pins everything before it.
+
+Limits: a chain can't tell that the newest entries were cut off the end. `verify-log` prints the head hash, so record it somewhere else (a ticket, a Slack message) when you need to prove later that nothing was dropped. Lines written before chaining existed are reported as `legacy_entries` and are not protected.
 
 ## Payment adapters
 
