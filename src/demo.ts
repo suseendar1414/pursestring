@@ -14,7 +14,7 @@ import { DEMO_PAGE } from "./demo-page.js";
 import { Governance, GovernanceError } from "./governance.js";
 import { PayPalMcpUpstream } from "./paypal-mcp.js";
 import { createMcpServer } from "./server.js";
-import { Store } from "./store.js";
+import { spentToday, Store } from "./store.js";
 
 /**
  * The public demo at /demo (PURSESTRING_DEMO=1). A scripted agent makes real MCP tool calls against a real
@@ -250,22 +250,63 @@ export class Demo {
   }
 
   state() {
+    const p = this.gov.config.policy;
+    const now = new Date();
+    const intents = this.gov.store.list();
+    const agents = [...new Set(intents.map((r) => r.intent.agent_id))].map((agent_id) => {
+      const mine = intents.filter((r) => r.intent.agent_id === agent_id);
+      return {
+        agent_id,
+        spent_today: spentToday(Object.fromEntries(mine.map((r) => [r.intent_id, r])), agent_id, now),
+        budget: p.hard_limits.per_agent_daily_budget,
+        intents: mine.length,
+        waiting: mine.filter((r) => r.status === "pending_approval").length,
+        refused: mine.filter((r) => r.status === "denied").length,
+      };
+    });
     return {
       live_paypal: this.livePayPal,
-      scenarios: Object.entries(SCENARIOS).map(([id, s]) => ({ id, title: s.title })),
-      intents: this.gov.store.list().map((r) => ({
+      scenarios: Object.entries(SCENARIOS).map(([id, s]) => ({ id, title: s.title, group: id.startsWith("refund") ? "refunds" : "purchases" })),
+      intents: intents.map((r) => ({
         intent_id: r.intent_id,
         status: r.status,
         agent_id: r.intent.agent_id,
-        what: r.action ? `${r.action.tool}` : `pay ${r.intent.vendor_domain}`,
+        what: r.action ? r.action.tool : `pay ${r.intent.vendor_domain}`,
+        kind: r.action ? "paypal_tool" : "purchase",
+        vendor: r.intent.vendor_domain,
         goal: r.intent.task_goal,
+        alternatives: r.intent.alternatives_attempted,
         amount: r.intent.amount,
         currency: r.intent.currency,
+        decision: r.evaluation.decision,
         summary: r.evaluation.summary,
+        rules: r.evaluation.rules,
+        rail: r.rail,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
         approved_by: r.approved_by,
         denied_by: r.denied_by,
-        payment: r.payment ? { id: r.payment.payment_id, status: r.payment.status, to: r.payment.payee.receiver } : undefined,
+        decided_via: r.decided_via,
+        args: r.action?.args,
+        executed_at: r.action?.executed_at,
+        result: r.action?.result,
+        payment: r.payment
+          ? { id: r.payment.payment_id, status: r.payment.status, to: r.payment.payee.receiver, sent_at: r.payment.sent_at }
+          : undefined,
       })),
+      agents,
+      policy: {
+        currency: p.currency,
+        allowlist: p.vendors.allowlist,
+        auto_approve_under: p.auto_approve.max_amount,
+        approval_over: p.require_approval.over_amount,
+        hard_max: p.hard_limits.max_amount,
+        daily_budget: p.hard_limits.per_agent_daily_budget,
+        payees: p.payees.map((x) => ({ vendor: x.vendor, wallet: x.wallet })),
+        refunds_auto_under: p.paypal_tools.refunds.auto_approve_under,
+        refunds_max: p.paypal_tools.refunds.max_amount,
+        always_human: p.paypal_tools.require_approval,
+      },
       log: this.entries,
     };
   }
