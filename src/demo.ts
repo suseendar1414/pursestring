@@ -47,8 +47,9 @@ export const SCENARIOS: Record<string, { title: string; run: (d: Demo, n: number
   },
   "refund-small": {
     title: "Support agent refunds $10, then retries the same refund",
-    run: async (d, n) => {
-      const call = d.refundCall(`CAP-${n}`, "10.00", "Customer was double-charged for order 991");
+    run: async (d) => {
+      // Always the same captured payment, so clicking this again is just another retry: never a second refund.
+      const call = d.refundCall("CAP-ORDER-991", "10.00", "Customer was double-charged for order 991");
       await d.agent(call.tool, call.args);
       d.log("agent", "The agent's connection drops and it retries the exact same refund.");
       await d.agent(call.tool, call.args);
@@ -130,6 +131,8 @@ export class Demo {
         auto_approve: { max_amount: 20 },
         hard_limits: { max_amount: 1000, per_agent_daily_budget: 200 },
         intent: { require_alternatives: false },
+        // A day, so the $10 refund scenario stays one refund however often a visitor clicks it.
+        idempotency: { window_minutes: 1440 },
         approvals: { require_code: false },
         adapter: { type: "paypal", paypal: { environment: "sandbox" } },
         payees: [{ vendor: "pdfocr.io", receiver: payee, type: "EMAIL", wallet: "PAYPAL" }],
