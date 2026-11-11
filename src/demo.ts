@@ -183,10 +183,23 @@ export class Demo {
     const body = parsed.length === 1 ? parsed[0] : parsed;
     const first = parsed[0] ?? {};
     const last = (parsed[parsed.length - 1] ?? {}) as { pursestring?: { intent_id?: string; note?: string } };
-    const why = (first.message ?? first.next_step ?? last.pursestring?.note ?? first.note) as string | undefined;
-    this.log("pursestring", `${tool} ${r.isError ? "refused" : "answered"}${why ? `: ${why}` : ""}`, body);
     const intentId = (first.intent_id as string | undefined) ?? last.pursestring?.intent_id;
+    this.log("pursestring", this.explain(tool, Boolean(r.isError), first, last.pursestring?.note, intentId), body);
     return { ...first, isError: Boolean(r.isError), intent_id: intentId };
+  }
+
+  /** PurseString's answer in plain words, for the log a judge reads. The raw answer stays in the payload. */
+  private explain(tool: string, isError: boolean, first: Record<string, unknown>, note: string | undefined, intentId?: string) {
+    const rec = intentId ? this.gov.store.get(intentId) : undefined;
+    if (isError && first.error === "pending_approval") {
+      return `${tool} paused: waiting for a human to approve. The agent waits; nothing was sent to PayPal.`;
+    }
+    if (isError && rec?.status === "denied" && rec.denied_by?.startsWith("policy")) {
+      const hard = rec.evaluation.rules.filter((x) => !x.passed && x.effect === "deny").map((x) => x.detail);
+      return `${tool} refused: ${hard.length ? hard.join("; ") : rec.evaluation.summary}. That's over a hard limit, so nobody can approve it. Nothing was sent to PayPal.`;
+    }
+    const why = (first.message ?? first.next_step ?? note ?? first.note) as string | undefined;
+    return `${tool} ${isError ? "refused" : "answered"}${why ? `: ${why}` : ""}`;
   }
 
   refundCall(capture: string, value: string, reason: string): ToolCall {
@@ -290,6 +303,11 @@ export class Demo {
         args: r.action?.args,
         executed_at: r.action?.executed_at,
         result: r.action?.result,
+        // An approved payment with nowhere to go: the payee comes from policy, never from the agent.
+        blocked:
+          !r.action && r.status === "approved" && !p.payees.some((x) => x.vendor === r.intent.vendor_domain)
+            ? "no payee on file"
+            : undefined,
         payment: r.payment
           ? { id: r.payment.payment_id, status: r.payment.status, to: r.payment.payee.receiver, sent_at: r.payment.sent_at }
           : undefined,

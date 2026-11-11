@@ -67,7 +67,7 @@ main { padding: 0 28px 48px; min-width: 0; }
 .crumb b { color: var(--muted); font-weight: 400; }
 .crumb-time { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
-.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.pill .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .pill.live { color: var(--good-ink); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .pill.live .dot { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
 h1 { font-size: 25px; font-weight: 700; margin: 0; letter-spacing: -.015em; }
@@ -191,6 +191,8 @@ pre { background: var(--code); border: 1px solid var(--line); padding: 10px; bor
 
 /* Live log */
 .log { max-height: 520px; overflow-y: auto; }
+.log.mini { max-height: 250px; }
+.log.mini .entry { padding: 6px 0; }
 .entry { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .who { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; padding-top: 2px; }
 .who.agent { color: #b392ff; } .who.pursestring { color: var(--accent); } .who.paypal { color: #7fb0ff; } .who.human { color: var(--good-ink); }
@@ -251,6 +253,7 @@ pre { background: var(--code); border: 1px solid var(--line); padding: 10px; bor
     </div>
     <div class="side-foot">
       <span id="mode" class="pill"><span class="dot"></span>connecting…</span>
+      <span class="pill" title="A real refund needs a real captured payment, so refunds go to a built-in stand-in for PayPal's MCP server"><span class="dot"></span>Refunds · simulated</span>
       <div class="row"><button class="ghost" id="reset" title="Clear this demo session">Reset demo</button><button class="ghost" id="theme" title="Switch light or dark">Theme</button></div>
       <a class="gh" href="https://github.com/suseendar1414/pursestring" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
@@ -318,6 +321,7 @@ function outcome(i) {
   if (i.status === "pending_approval") return { k: "warn", ic: "!", t: "Waiting for review" };
   if (i.status === "denied") return { k: "bad", ic: "✕", t: i.denied_by && i.denied_by.indexOf("policy") === 0 ? "Refused by policy" : "Denied by a human" };
   if (i.status === "expired") return { k: "muted", ic: "–", t: "Expired" };
+  if (i.blocked) return { k: "bad", ic: "✕", t: "Blocked: " + i.blocked };
   var human = i.approved_by && i.approved_by.indexOf("policy") !== 0;
   if (i.status === "paid" || i.status === "executed") return human ? { k: "human", ic: "✓", t: "Approved by a human" } : { k: "good", ic: "✓", t: "Ran automatically" };
   if (i.status === "approved") return { k: "muted", ic: "–", t: human ? "Approved, nothing moved" : "Approved, not run yet" };
@@ -399,7 +403,7 @@ function overview() {
   var I = S.intents;
   var done = I.filter(function (i) { return moved(i) > 0; });
   var pend = I.filter(function (i) { return i.status === "pending_approval"; });
-  var refused = I.filter(function (i) { return i.status === "denied"; });
+  var refused = I.filter(function (i) { return i.status === "denied" || i.blocked; });
   var sum = function (a) { return a.reduce(function (t, i) { return t + i.amount; }, 0); };
   var checks = I.reduce(function (a, i) { return a + i.rules.length; }, 0), passed = I.reduce(function (a, i) { return a + i.rules.filter(function (r) { return r.passed; }).length; }, 0);
   var kpi = function (k, v, n) { return '<div class="card kpi"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="n">' + n + "</div></div>"; };
@@ -415,7 +419,7 @@ function overview() {
     kpi("Review queue", String(pend.length).padStart(2, "0"), pend.length ? money(sum(pend)) + " waiting on you" : "nothing waiting") +
     kpi("Policy checks", checks ? (passed / checks * 100).toFixed(1) + "%" : "—", passed + " of " + checks + " rule checks passed") +
     "</div>" +
-    '<div class="grid ov"><div class="card"><h2>Request volume</h2><p class="vol-legend">Agent requests every 15 seconds, last 6 minutes</p>' + volume(I) + "</div>" +
+    '<div class="grid ov"><div class="card"><h2>Live agent traffic <button class="link" data-goto="activity">Full log →</button></h2>' + traffic(7) + "</div>" +
     '<div class="card"><h2>Needs human review <button class="link" data-goto="approvals">All →</button></h2>' + rq + "</div></div>" +
     '<div class="card"><h2>Recent activity <button class="link" data-goto="activity">All →</button></h2>' + (recent.length ? table(recent, false) : '<p class="empty">No activity yet. Run an agent task above.</p>') + "</div>";
 }
@@ -433,6 +437,14 @@ function approvals() {
   return '<div class="head"><div><h1>Approvals</h1><p class="sub">Spend and PayPal actions that policy paused for a human. In production these also go to Slack or Discord.</p></div></div>' +
     (pend.length ? pend.map(function (i) { return '<div class="card" style="margin-bottom:16px">' + reviewCard(i, true) + "</div>"; }).join("")
       : '<div class="card"><p class="empty">Nothing is waiting for you. Go to Overview and run "Agent wants to spend $80" or "Support agent wants to refund $120".</p></div>');
+}
+
+/** The newest log lines, so the agent, PurseString and PayPal story reads on one screen. */
+function traffic(n) {
+  var rows = S.log.slice(-n).reverse().map(function (e) {
+    return '<div class="entry"><div><div class="who ' + esc(e.actor) + '">' + esc(e.actor) + '</div><div class="when-s">' + time(e.ts) + "</div></div><div>" + esc(e.text) + "</div></div>";
+  }).join("");
+  return '<div class="log mini">' + (rows || '<p class="empty">Nothing yet. Run an agent task above.</p>') + "</div>";
 }
 
 function activity() {
@@ -456,7 +468,8 @@ function agents() {
       return '<div class="card"><b>' + esc(a.agent_id) + '</b><div class="sub" style="font-size:12px">' + esc(known[a.agent_id] || "") + '</div><div class="meter"><span class="' + (pct >= 80 ? "hot" : "") + '" style="width:' + pct + '%"></span></div>' +
         '<div class="sub" style="font-size:12px;margin-bottom:10px">' + money(a.spent_today) + " of " + money(a.budget) + " daily budget</div>" +
         '<div class="stats"><div><b>' + a.intents + "</b>intents</div><div><b>" + a.waiting + "</b>waiting</div><div><b>" + a.refused + "</b>refused</div></div></div>";
-    }).join("") + "</div>";
+    }).join("") + "</div>" +
+    '<div class="card" style="margin-top:16px"><h2>Request volume</h2><p class="vol-legend">Agent requests every 15 seconds, last 6 minutes</p>' + volume(S.intents) + "</div>";
 }
 
 function policies() {
@@ -487,7 +500,7 @@ function render() {
   $("badge").textContent = String(pend).padStart(2, "0");
   $("badge").className = "badge" + (pend ? "" : " zero");
   $("mode").className = "pill" + (S.live_paypal ? " live" : "");
-  $("mode").innerHTML = '<span class="dot"></span>' + (S.live_paypal ? "Live · PayPal sandbox" : "Simulated payouts");
+  $("mode").innerHTML = '<span class="dot"></span>' + (S.live_paypal ? "Payouts · live PayPal sandbox" : "Payouts · simulated");
   var html = { overview: overview, approvals: approvals, activity: activity, agents: agents, policies: policies }[v]();
   var y = window.scrollY;
   $("view").innerHTML = html;

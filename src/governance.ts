@@ -360,7 +360,7 @@ export class Governance {
     }
     if (rec.status === "denied" || rec.status === "expired") {
       throw new GovernanceError(
-        `Intent ${intentId} is ${rec.status}${rec.decision_note ? `: ${rec.decision_note}` : ""}. Do not attempt this purchase.`,
+        `Intent ${intentId} is ${rec.status}: ${rec.decision_note || rec.evaluation.summary}. Do not attempt this purchase.`,
         rec.status,
       );
     }
