@@ -29,3 +29,12 @@ test("the demo pauses a large refund, runs it once on approval and refuses a hug
   await d.reset();
   assert.equal(d.state().intents.length, 0);
 });
+
+test("clicking the $10 refund scenario again is a retry, not a second refund", async () => {
+  const d = await new Demo().reset();
+  await d.run("refund-small");
+  await d.run("refund-small");
+  assert.deepEqual(byStatus(d), ["create_refund:executed"]);
+  assert.equal(d.entries.filter((e) => e.actor === "paypal").length, 1, "PayPal is called once across both clicks");
+  assert.equal(d.entries.filter((e) => /Already ran/.test(e.text)).length, 3);
+});
