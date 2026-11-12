@@ -44,6 +44,18 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
   <br><sub>A checkout hangs, the agent retries, and PurseString hands back the same card. Claude Desktop on the Lithic sandbox, sped up 2.5×.</sub>
 </p>
 
+## 🏆 PayPal AI Hackathon: how PurseString uses PayPal and AI
+
+**[Try the live demo](https://pursestring-demo.onrender.com/demo)**: no login needed. You play the human approver while an agent tries to buy things and issue refunds on the PayPal sandbox.
+
+- **PayPal Agent Toolkit / PayPal MCP server** (`@paypal/mcp`): PurseString runs PayPal's own MCP server behind itself and re-exposes its tools to the agent, with guardrails. Read-only tools pass through. Refunds are auto-run, paused for a human, or refused, depending on the amount. Accepting a dispute or cancelling always needs a human. A retried refund returns PayPal's first answer instead of refunding twice.
+- **PayPal Payouts API** (PayPal and Venmo): the `send_payment` tool pays vendors. The recipient comes from a payee directory in `policies.yaml`, never from the agent, so a prompt injection has no address to swap in. The intent ID is sent as `PayPal-Request-Id`, so a payout can't happen twice.
+- **PayPal OAuth** (client credentials): PurseString keeps the client secret, and PayPal's MCP server only ever sees short-lived access tokens.
+- **AI:** the agent being governed is any MCP-capable model. We built and tested with **Claude** (Claude Desktop and Claude Code), and the project speaks the **Model Context Protocol** through the official TypeScript SDK. **Claude Code** was also used as a pair programmer for the code, tests and docs.
+- **Render:** the hosted demo runs on [Render](https://render.com), deployed from this repo's `Dockerfile` and [`render.yaml`](render.yaml).
+
+Setup in the PayPal sandbox takes about 5 minutes: see **[docs/paypal.md](docs/paypal.md#set-it-up-in-the-paypal-sandbox-about-5-minutes-no-real-money)**.
+
 ## 🧩 What it does, and what works today
 
 | | | Status |
