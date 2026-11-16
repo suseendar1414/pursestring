@@ -1,0 +1,15 @@
+src/
+test/
+docs/
+.github/
+Dockerfile
+docker-compose.yml
+render.yaml
+tsconfig.json
+server.json
+.env*
+*.mcpb
+assets/banner.svg
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
