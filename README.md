@@ -13,6 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-server-6366f1" alt="MCP server"></a>
   <a href="https://github.com/suseendar1414/pursestring/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/github/issues/suseendar1414/pursestring/good%20first%20issue?color=7057ff&label=good%20first%20issues" alt="Good first issues"></a>
   <a href="https://discord.gg/qBqgx2GB86"><img src="https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://mcpservers.org/servers/suseendar1414/pursestring"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
 </p>
 
 <p align="center">
