@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.suseendar1414/pursestring",
+  "title": "PurseString",
+  "description": "Spend policy and human approvals for AI agents, checked before a single-use capped card is issued.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/suseendar1414/pursestring",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/suseendar1414/pursestring",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "pursestring",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "PURSESTRING_POLICY", "description": "Path to policies.yaml (default ./policies.yaml, then ~/.pursestring/policies.yaml)", "isRequired": false },
+        { "name": "LITHIC_API_KEY", "description": "Use Lithic virtual cards (sandbox by default) instead of the mock rail", "isRequired": false, "isSecret": true },
+        { "name": "PAYPAL_CLIENT_ID", "description": "Enable PayPal payouts to vendor accounts set in the policy (sandbox by default)", "isRequired": false, "isSecret": true },
+        { "name": "PAYPAL_CLIENT_SECRET", "description": "PayPal client secret, needed with PAYPAL_CLIENT_ID", "isRequired": false, "isSecret": true },
+        { "name": "SLACK_WEBHOOK_URL", "description": "Slack incoming webhook for approval requests", "isRequired": false, "isSecret": true }
+      ]
+    }
+  ]
+}

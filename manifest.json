@@ -1,0 +1,44 @@
+{
+  "manifest_version": "0.3",
+  "name": "pursestring",
+  "display_name": "PurseString",
+  "version": "0.1.0",
+  "description": "Spend policy and human approvals for AI agents, checked before a single-use capped card is issued.",
+  "long_description": "PurseString sits between your AI agent and your money. The agent submits a purchase intent; PurseString checks it against your policies.yaml (vendor allowlist, per-transaction and daily limits, monthly caps for recurring spend) and auto-approves, denies, or asks a human. Only an approved intent gets a single-use virtual card capped to the approved amount, or a PayPal payout to the vendor account in your policy. With no keys it runs on the mock rail, so cards are fake and no money moves. It is not a payment gateway or wallet: it holds no funds and stops payments before money moves.",
+  "author": { "name": "suseendar1414", "url": "https://github.com/suseendar1414" },
+  "repository": { "type": "git", "url": "https://github.com/suseendar1414/pursestring" },
+  "homepage": "https://github.com/suseendar1414/pursestring",
+  "documentation": "https://github.com/suseendar1414/pursestring/blob/main/docs/try-it.md",
+  "support": "https://github.com/suseendar1414/pursestring/issues",
+  "icon": "assets/icon.png",
+  "license": "Apache-2.0",
+  "keywords": ["payments", "governance", "approvals", "virtual-cards", "budgets", "paypal", "lithic", "audit-log"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "PURSESTRING_POLICY": "${user_config.policy_file}",
+        "LITHIC_API_KEY": "${user_config.lithic_api_key}",
+        "PAYPAL_CLIENT_ID": "${user_config.paypal_client_id}",
+        "PAYPAL_CLIENT_SECRET": "${user_config.paypal_client_secret}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "check_policy_compliance", "description": "Dry-run a purchase against your policy without creating an intent." },
+    { "name": "submit_purchase_intent", "description": "Ask to spend: returns approved, denied, or pending a human." },
+    { "name": "request_ephemeral_card", "description": "Get a single-use card capped to an approved intent's amount." },
+    { "name": "send_payment", "description": "Pay an approved intent to the vendor's PayPal or Venmo account set in your policy." },
+    { "name": "get_intent_status", "description": "Check an intent's status, for example after a human decides." }
+  ],
+  "user_config": {
+    "policy_file": { "type": "file", "title": "Policy file (optional)", "description": "Your policies.yaml. Leave empty to use ~/.pursestring/policies.yaml or the safe defaults.", "required": false },
+    "lithic_api_key": { "type": "string", "title": "Lithic API key (optional)", "description": "Turns on Lithic virtual cards (sandbox by default). Leave empty for the mock rail.", "sensitive": true, "required": false },
+    "paypal_client_id": { "type": "string", "title": "PayPal client ID (optional)", "description": "Turns on PayPal payouts (sandbox by default).", "sensitive": true, "required": false },
+    "paypal_client_secret": { "type": "string", "title": "PayPal client secret (optional)", "description": "Needed with the PayPal client ID.", "sensitive": true, "required": false }
+  },
+  "compatibility": { "platforms": ["darwin", "win32", "linux"], "runtimes": { "node": ">=20.0.0" } }
+}

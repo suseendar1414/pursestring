@@ -5,3 +5,4 @@ dist/
 .env
 policies.yaml
 !examples/policies.yaml
+*.mcpb
