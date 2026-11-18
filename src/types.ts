@@ -155,7 +155,7 @@ export type PayeeWallet = "PAYPAL" | "VENMO";
 /**
  * Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent.
  * Each rail reads its own field: paypal `receiver` (with `type` and `wallet`), stripe_connect `stripe_account`,
- * razorpayx `razorpayx_fund_account`, modern_treasury `modern_treasury_account`.
+ * razorpayx `razorpayx_fund_account`, modern_treasury `modern_treasury_account`, airwallex_payouts `airwallex_beneficiary`.
  */
 export interface Payee {
   receiver?: string;
@@ -167,10 +167,17 @@ export interface Payee {
   razorpayx_fund_account?: string;
   /** Modern Treasury external account ID (the receiving account). */
   modern_treasury_account?: string;
+  /** Airwallex beneficiary ID (a UUID), saved and validated in Airwallex beforehand. */
+  airwallex_beneficiary?: string;
 }
 
 /** The payee fields a payout rail can pay to. */
-export type PayeeDestinationField = "receiver" | "stripe_account" | "razorpayx_fund_account" | "modern_treasury_account";
+export type PayeeDestinationField =
+  | "receiver"
+  | "stripe_account"
+  | "razorpayx_fund_account"
+  | "modern_treasury_account"
+  | "airwallex_beneficiary";
 
 /** What we persist about a payout. */
 export interface PaymentRecord {

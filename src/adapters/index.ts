@@ -1,5 +1,6 @@
 import type { Config, RailName } from "../config.js";
 import { AirwallexAdapter } from "./airwallex.js";
+import { AirwallexPayoutsAdapter } from "./airwallex-payouts.js";
 import { LithicAdapter } from "./lithic.js";
 import { ModernTreasuryAdapter } from "./modern-treasury.js";
 import { MockAdapter } from "./mock.js";
@@ -46,14 +47,29 @@ export class Rails {
       case "privacy":
         if (!this.config.env.privacyApiKey) throw new Error("A purchase was routed to 'privacy' but PRIVACY_API_KEY is not set.");
         return new PrivacyAdapter(this.config.env.privacyApiKey);
-      case "airwallex": {
-        const { airwallexClientId: clientId, airwallexApiKey: apiKey, airwallexCardholderId: cardholderId } = this.config.env;
-        if (!clientId || !apiKey || !cardholderId) {
+      case "airwallex":
+      case "airwallex_payouts": {
+        const { airwallexClientId: clientId, airwallexApiKey: apiKey, airwallexCardholderId: cardholderId, airwallexAccountId } =
+          this.config.env;
+        const aw = this.config.policy.adapter.airwallex;
+        const needCardholder = name === "airwallex";
+        if (!clientId || !apiKey || (needCardholder && !cardholderId)) {
           throw new Error(
-            "A purchase was routed to 'airwallex' but AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY and AIRWALLEX_CARDHOLDER_ID are not all set.",
+            `A purchase was routed to '${name}' but AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY` +
+              (needCardholder ? " and AIRWALLEX_CARDHOLDER_ID are not all set." : " are not both set."),
           );
         }
-        return new AirwallexAdapter({ clientId, apiKey, cardholderId, environment: this.config.policy.adapter.airwallex.environment });
+        const client = {
+          clientId,
+          apiKey,
+          environment: aw.environment,
+          loginAs: airwallexAccountId,
+          apiVersion: aw.api_version,
+          baseUrl: aw.base_url,
+        };
+        return needCardholder
+          ? new AirwallexAdapter({ ...client, cardholderId: cardholderId!, createdBy: aw.created_by })
+          : new AirwallexPayoutsAdapter({ ...client, reason: aw.payout_reason, transferMethod: aw.transfer_method });
       }
       case "paypal": {
         const { paypalClientId: clientId, paypalClientSecret: clientSecret } = this.config.env;
