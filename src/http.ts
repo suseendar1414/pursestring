@@ -35,6 +35,7 @@ const LITHIC_RESULT: Record<AuthorizationCode, string> = {
   card_expired: "CARD_PAUSED",
   intent_not_active: "CARD_PAUSED",
   unknown_card: "CARD_PAUSED",
+  halted: "CARD_PAUSED",
 };
 
 interface LithicAsaRequest {
@@ -345,6 +346,25 @@ export function startHttp(
         }
         const r = gov.store.verifyAudit();
         return send(res, r.ok ? 200 : 409, r);
+      }
+
+      if ((url.pathname === "/halt" || url.pathname === "/resume") && req.method === "POST") {
+        if (!bearerOk(req, adminToken)) {
+          return send(res, 401, { error: adminToken ? "unauthorized" : "set PURSESTRING_ADMIN_TOKEN to enable the kill-switch API" });
+        }
+        const body = ((await readJson(req)) ?? {}) as { agent_id?: string; reason?: string; by?: string };
+        if (url.pathname === "/halt") {
+          const halt = await gov.halt({ agent_id: body.agent_id, reason: body.reason ?? "halted over HTTP", by: body.by ?? "http-admin", via: "http" });
+          return send(res, 200, halt);
+        }
+        return send(res, 200, gov.resume({ agent_id: body.agent_id, by: body.by ?? "http-admin", via: "http" }));
+      }
+
+      if (url.pathname === "/halts" && req.method === "GET") {
+        if (!bearerOk(req, adminToken)) {
+          return send(res, 401, { error: adminToken ? "unauthorized" : "set PURSESTRING_ADMIN_TOKEN to enable the kill-switch API" });
+        }
+        return send(res, 200, gov.activeHalts());
       }
 
       if (url.pathname.startsWith("/intents")) {

@@ -35,6 +35,9 @@ function nextStep(rec: IntentRecord, payout: boolean): string {
     case "pending_approval":
       return `Paused for human approval. Do not buy another way. Call get_intent_status with intent_id "${rec.intent_id}" and wait_seconds to wait for a decision.`;
     case "denied":
+      if (rec.evaluation.rules.some((r) => !r.passed && r.rule.startsWith("kill_switch"))) {
+        return "Spending is halted for this agent. Stop buying, tell the user why, and wait for a human to resume it. Do not retry or pay another way.";
+      }
       return "Denied. Do not attempt this purchase; tell the user why and look for a free alternative.";
     case "card_issued":
       return `A card was already issued for this intent. Call request_ephemeral_card with "${rec.intent_id}" to get the same card again. Do not create a new purchase.`;

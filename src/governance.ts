@@ -2,7 +2,8 @@ import type { Rails } from "./adapters/index.js";
 import { hashApprovalCode, newApprovalCode, verifyApprovalCode, type ApprovalChannel } from "./approvals.js";
 import type { Config } from "./config.js";
 import type { Notifier, RefundNotice } from "./notify.js";
-import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel } from "./policy.js";
+import { activeHalt, haltKey, similarRecent, type HaltRecord, type Halts } from "./killswitch.js";
+import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel, withRule } from "./policy.js";
 import { createHash } from "node:crypto";
 import { exponent, formatMinor, isWholeMinor, toMajor, toMinor } from "./money.js";
 import { cardCostMinor, holdStatus, openHoldMinor, usedMinor } from "./holds.js";
@@ -116,7 +117,8 @@ export type AuthorizationCode =
   | "card_expired"
   | "already_used"
   | "over_amount"
-  | "merchant_mismatch";
+  | "merchant_mismatch"
+  | "halted";
 
 export interface AuthorizationDecision {
   approved: boolean;
@@ -279,17 +281,54 @@ export class Governance {
     checkAmount(intent);
     const key = idempotencyKey(intent);
     let approvalCode: string | undefined;
-    const result = this.store.transact((intents, now): SubmitResult => {
+    let resumeCode: string | undefined;
+    let tripped: HaltRecord | undefined;
+    const result = this.store.transact((intents, now, halts): SubmitResult => {
       const existing = this.findRecent(intents, key, now);
       if (existing) return { record: existing, deduplicated: true };
 
-      const evaluation = this.evaluateRecord(intent, action, intents, now);
+      const intentId = this.store.newId();
+      let evaluation = this.evaluateRecord(intent, action, intents, now);
+      const halt = activeHalt(halts, intent.agent_id);
+      const ld = this.config.policy.kill_switch.loop_detection;
+      if (halt) {
+        evaluation = withRule(evaluation, {
+          rule: "kill_switch",
+          passed: false,
+          effect: "deny",
+          detail: `spending is halted for ${halt.scope === "all" ? "all agents" : intent.agent_id}: ${halt.reason}`,
+        });
+      } else if (ld.enabled && !action) {
+        // Checked in the same transaction as the write, so two racing requests can't both slip under the limit.
+        const prior = similarRecent(this.config.policy, intents, halts, intent, now);
+        if (prior.length + 1 >= ld.max_similar) {
+          const vendor = normalizeDomain(intent.vendor_domain);
+          const reason =
+            `loop detected: ${prior.length + 1} near-identical purchases (${vendor}, amounts within ` +
+            `${ld.amount_tolerance_percent}%) in ${ld.window_minutes} minutes under different task IDs`;
+          tripped = {
+            scope: "agent",
+            agent_id: intent.agent_id.trim(),
+            reason,
+            by: "policy:loop_detection",
+            via: "loop_detector",
+            tripped_at: now.toISOString(),
+            intent_ids: [...prior.map((r) => r.intent_id), intentId],
+          };
+          if (this.requireCode && this.canSendCode) {
+            resumeCode = newApprovalCode();
+            tripped.resume_code = hashApprovalCode(resumeCode);
+          }
+          halts[haltKey(intent.agent_id)] = tripped;
+          evaluation = withRule(evaluation, { rule: "kill_switch.loop_detection", passed: false, effect: "deny", detail: reason });
+        }
+      }
       const status =
         evaluation.decision === "auto_approve" ? "approved" : evaluation.decision === "deny" ? "denied" : "pending_approval";
       const ts = now.toISOString();
       const rail = action ? "paypal" : routeRail(this.config.policy, intent).rail;
       const record: IntentRecord = {
-        intent_id: this.store.newId(),
+        intent_id: intentId,
         idempotency_key: key,
         intent,
         evaluation,
@@ -339,6 +378,7 @@ export class Governance {
       });
       if (record.status === "pending_approval") await this.notifier.approvalRequested(record, { code: approvalCode });
     }
+    if (tripped) await this.haltNotice(tripped, resumeCode);
     return result;
   }
 
@@ -350,8 +390,9 @@ export class Governance {
    * The checks every way of moving money shares: the intent must be approved and live, and an auto-approval is
    * re-checked against today's budget, since other spends may have happened since submit. Runs inside a transaction.
    */
-  private assertSpendable(rec: IntentRecord, intents: Record<string, IntentRecord>, now: Date) {
+  private assertSpendable(rec: IntentRecord, intents: Record<string, IntentRecord>, now: Date, halts: Halts) {
     const intentId = rec.intent_id;
+    this.assertNotHalted(rec, halts);
     if (rec.status === "pending_approval") {
       throw new GovernanceError(
         `Intent ${intentId} is waiting for human approval. Poll get_intent_status; do not resubmit or buy another way.`,
@@ -373,6 +414,18 @@ export class Governance {
         rec.updated_at = now.toISOString();
         throw new GovernanceError(`Intent ${intentId} no longer qualifies for auto-approval: ${fresh.summary}`, rec.status);
       }
+    }
+  }
+
+  /** The kill switch: nothing moves money for a halted agent, whatever was approved before the halt. */
+  private assertNotHalted(rec: IntentRecord, halts: Halts) {
+    const halt = activeHalt(halts, rec.intent.agent_id);
+    if (halt) {
+      throw new GovernanceError(
+        `Spending is halted for ${halt.scope === "all" ? "all agents" : rec.intent.agent_id} (${halt.reason}). ` +
+          "Stop and tell the user; a human has to resume spending. Do not retry or pay another way.",
+        "halted",
+      );
     }
   }
 
@@ -398,9 +451,11 @@ export class Governance {
       );
     }
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "issue"; record: IntentRecord };
-    const claim = this.store.transact((intents, now): Claim => {
+    const claim = this.store.transact((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (!rec) throw new GovernanceError(`No intent ${intentId}. Call submit_purchase_intent first.`, "not_found");
+      // Halted agents don't get card details again either: the card itself declines, but don't hand it out.
+      this.assertNotHalted(rec, halts);
 
       if (rec.status === "card_issued" && rec.card) {
         if (rec.card.closed_at || (rec.card.expires_at && new Date(rec.card.expires_at) <= now)) {
@@ -421,7 +476,7 @@ export class Governance {
       if (rec.status === "issuing" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
         throw new GovernanceError(`A card for ${intentId} is being issued right now. Retry in a few seconds.`, "in_progress");
       }
-      this.assertSpendable(rec, intents, now);
+      this.assertSpendable(rec, intents, now, halts);
       rec.status = "issuing";
       rec.updated_at = now.toISOString();
       return { kind: "issue", record: rec };
@@ -511,14 +566,15 @@ export class Governance {
     }
 
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; payee: Payee };
-    const claim = this.store.transact((intents, now): Claim => {
+    const claim = this.store.transact((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "paid" && rec.payment) return { kind: "replay", record: rec };
+      this.assertNotHalted(rec, halts);
       if (rec.status === "paying" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
         throw new GovernanceError(`A payment for ${intentId} is being sent right now. Retry in a few seconds.`, "in_progress");
       }
       // A stale "paying" means a crash mid-call. Retrying is safe: the rail dedupes on the intent ID.
-      if (rec.status !== "paying") this.assertSpendable(rec, intents, now);
+      if (rec.status !== "paying") this.assertSpendable(rec, intents, now, halts);
       if (rec.intent.is_recurring) {
         throw new GovernanceError(
           `${intentId} is recurring, and a payout is a one-off payment. Route recurring spend to a card rail in policies.yaml.`,
@@ -657,7 +713,7 @@ export class Governance {
     }
 
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "run"; record: IntentRecord };
-    const claim = this.store.transact((intents, now): Claim => {
+    const claim = this.store.transact((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "executed") return { kind: "replay", record: rec };
       if (rec.status === "executing") {
@@ -669,7 +725,7 @@ export class Governance {
           "outcome_unknown",
         );
       }
-      this.assertSpendable(rec, intents, now);
+      this.assertSpendable(rec, intents, now, halts);
       rec.status = "executing";
       rec.updated_at = now.toISOString();
       return { kind: "run", record: rec };
@@ -719,6 +775,97 @@ export class Governance {
       approved_by: record.approved_by,
     });
     return { record, result, replayed: false };
+  }
+
+  /** The kill switch's current state: every halt still in force. */
+  activeHalts(): HaltRecord[] {
+    return this.store.transact((_i, _n, halts) =>
+      Object.values(halts)
+        .filter((h) => !h.resumed_at)
+        .map(({ resume_code: _code, ...h }) => h),
+    );
+  }
+
+  /**
+   * Pull the kill switch for one agent, or for every agent when agent_id is left out. Safe to call from anywhere,
+   * agents included: halting can only stop money. Halting what's already halted keeps the first halt.
+   */
+  async halt(opts: { agent_id?: string; reason: string; by: string; via: ApprovalChannel }): Promise<HaltRecord> {
+    let code: string | undefined;
+    const out = this.store.transact((_intents, now, halts) => {
+      const key = haltKey(opts.agent_id);
+      const current = halts[key];
+      if (current && !current.resumed_at) return { halt: current, fresh: false };
+      const halt: HaltRecord = {
+        scope: opts.agent_id ? "agent" : "all",
+        ...(opts.agent_id ? { agent_id: opts.agent_id.trim() } : {}),
+        reason: opts.reason,
+        by: opts.by,
+        via: opts.via,
+        tripped_at: now.toISOString(),
+      };
+      if (this.requireCode && this.canSendCode) {
+        code = newApprovalCode();
+        halt.resume_code = hashApprovalCode(code);
+      }
+      halts[key] = halt;
+      return { halt, fresh: true };
+    });
+    if (out.fresh) await this.haltNotice(out.halt, code);
+    const { resume_code: _c, ...shown } = out.halt;
+    return shown;
+  }
+
+  /**
+   * Lift a halt. Like approving, a terminal resume needs the one-time code sent to Slack or Discord when codes are
+   * required, so an agent with a shell can't switch itself back on. Lifting an agent's halt leaves a global one alone.
+   */
+  resume(opts: { agent_id?: string; by: string; via: ApprovalChannel; code?: string }): HaltRecord {
+    const key = haltKey(opts.agent_id);
+    const out = this.store.transact((_intents, now, halts): { halt: HaltRecord; error?: GovernanceError } => {
+      const h = halts[key];
+      const who = opts.agent_id ? `agent ${opts.agent_id}` : "all agents";
+      if (!h || h.resumed_at) throw new GovernanceError(`Spending isn't halted for ${who}.`, "not_halted");
+      if (opts.via === "cli" && this.requireCode) {
+        if (!h.resume_code) {
+          throw new GovernanceError(`This halt has no resume code, so resume it over the HTTP admin API (POST /resume).`, "code_unavailable");
+        }
+        if (!opts.code) {
+          throw new GovernanceError(
+            `Resuming from the terminal needs the one-time code from the Slack or Discord message: pursestring resume${opts.agent_id ? ` --agent ${opts.agent_id}` : ""} --code XXXXX-XXXXX`,
+            "code_required",
+          );
+        }
+        if (!verifyApprovalCode(opts.code, h.resume_code)) {
+          // Too many wrong codes leaves the halt in place (it already stops everything) and drops the code,
+          // so from then on only the HTTP admin API can resume.
+          h.resume_code_attempts = (h.resume_code_attempts ?? 0) + 1;
+          if (h.resume_code_attempts >= MAX_CODE_ATTEMPTS) h.resume_code = undefined;
+          return { halt: h, error: new GovernanceError(`Wrong resume code for ${who}.`, "bad_code") };
+        }
+      }
+      h.resumed_at = now.toISOString();
+      h.resumed_by = opts.by;
+      h.resumed_via = opts.via;
+      h.resume_code = undefined;
+      return { halt: h };
+    });
+    if (out.error) {
+      this.store.audit("resume_code_rejected", { key, by: opts.by, via: opts.via, attempts: out.halt.resume_code_attempts });
+      throw out.error;
+    }
+    this.store.audit("kill_switch_resumed", { scope: out.halt.scope, agent_id: out.halt.agent_id, by: opts.by, via: opts.via });
+    return out.halt;
+  }
+
+  private async haltNotice(halt: HaltRecord, code?: string) {
+    const { resume_code: _c, ...entry } = halt;
+    this.store.audit("kill_switch_tripped", entry);
+    try {
+      await this.notifier.killSwitchTripped?.(halt, { code });
+    } catch (err) {
+      this.store.audit("kill_switch_notify_failed", { agent_id: halt.agent_id, error: String(err) });
+    }
   }
 
   async getStatus(intentId: string, waitSeconds = 0): Promise<IntentRecord> {
@@ -826,7 +973,7 @@ export class Governance {
   authorize(req: AuthorizationRequest): AuthorizationDecision {
     const t0 = performance.now();
     const jit = this.config.policy.jit;
-    const result = this.store.transact((intents, now) => {
+    const result = this.store.transact((intents, now, halts) => {
       const rec = Object.values(intents).find((r) => r.card?.token === req.card_token);
       const decide = (code: AuthorizationCode, reason: string) => {
         if (rec) {
@@ -848,6 +995,8 @@ export class Governance {
 
       if (!rec?.card) return decide("unknown_card", "No PurseString intent owns this card.");
       const card = rec.card;
+      const halt = activeHalt(halts, rec.intent.agent_id);
+      if (halt) return decide("halted", `Spending is halted: ${halt.reason}`);
       if (rec.status !== "card_issued") return decide("intent_not_active", `Intent is ${rec.status}.`);
       if (card.closed_at || (card.expires_at && new Date(card.expires_at) <= now)) {
         return decide("card_expired", `Single-use card expired at ${card.expires_at}.`);

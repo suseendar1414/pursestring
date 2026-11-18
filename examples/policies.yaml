@@ -112,3 +112,12 @@ jit:
   enabled: true
   tolerance_percent: 0            # allow this much over the approved amount (tax, FX)
   require_merchant_match: true    # decline when the merchant descriptor doesn't mention the vendor
+
+# Kill switch: `pursestring halt [--agent id]` stops spending at once. Loop detection pulls it by itself
+# when an agent keeps asking for the same purchase under new task IDs. See docs/policies.md.
+kill_switch:
+  loop_detection:
+    enabled: true
+    window_minutes: 10
+    max_similar: 5                # the 5th near-identical intent in 10 minutes halts the agent
+    amount_tolerance_percent: 10

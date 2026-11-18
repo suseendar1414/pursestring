@@ -77,6 +77,13 @@ adapter:
 
 payees: []                        # where payout rails send money, per vendor (see below)
 
+kill_switch:
+  loop_detection:
+    enabled: true                 # halt an agent that keeps re-buying the same thing (see below)
+    window_minutes: 10
+    max_similar: 5
+    amount_tolerance_percent: 10
+
 routes: []                        # see "Rail routing" below
 
 cards:
@@ -140,6 +147,38 @@ payees:
 ```
 
 `highnote`, `marqeta`, `amex`, `network_token` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
+
+## Kill switch and loop detection
+
+A halt stops an agent's spending at once, whatever was approved before it:
+
+- new intents are denied (rule `kill_switch`),
+- approved intents can't get a card or be paid (`halted` error), and a card already issued isn't handed out again,
+- real-time card authorizations decline (`halted`, sent to Lithic as `CARD_PAUSED`).
+
+Pull it by hand for one agent or for all of them:
+
+```bash
+pursestring halt --agent invoice-bot --reason "acting strangely"   # one agent
+pursestring halt --reason "incident"                               # every agent
+pursestring halts                                                  # what's in force
+pursestring resume --agent invoice-bot --code XXXXX-XXXXX
+```
+
+Over HTTP, with `PURSESTRING_ADMIN_TOKEN`: `POST /halt` and `POST /resume` (JSON body `{"agent_id": "...", "reason": "..."}`, leave `agent_id` out for all agents) and `GET /halts`. Halting is always allowed. Resuming from the terminal needs the one-time code sent to Slack or Discord when approval codes are on, the same rule as `pursestring approve`, so an agent with a shell can't switch itself back on. Resuming one agent leaves a global halt in place.
+
+Loop detection halts an agent on its own when it keeps asking for the same purchase under fresh task IDs, which is what an agent stuck in a retry loop looks like. Retries with the same task ID are already deduplicated and don't count.
+
+```yaml
+kill_switch:
+  loop_detection:
+    enabled: true
+    window_minutes: 10            # how far back to look
+    max_similar: 5                # the 5th near-identical intent in the window halts the agent
+    amount_tolerance_percent: 10  # 15.00 and 16.50 count as the same purchase
+```
+
+"Near-identical" means the same agent, the same vendor domain, the same currency and amounts within the tolerance, compared in whole minor units. The intent that trips it is denied, the halt is written to the audit log with the IDs of the intents that looked like a loop, and Slack or Discord gets the resume command. Intents from before the last resume don't count, so resuming doesn't trip it again straight away.
 
 ## Vendor matching
 

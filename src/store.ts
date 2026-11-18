@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { cardCostMinor } from "./holds.js";
 import { formatMajor, toMajor, toMinor } from "./money.js";
 import { normalizeDomain } from "./policy.js";
+import type { Halts } from "./killswitch.js";
 import type { IntentRecord, PurchaseIntent } from "./types.js";
 
 /**
@@ -140,6 +141,8 @@ function lastLine(path: string): string | null {
 interface StateFile {
   version: 1;
   intents: Record<string, IntentRecord>;
+  /** Kill-switch state, shared by the server and the CLI like everything else here. */
+  halts?: Halts;
 }
 
 const LOCK_STALE_MS = 10_000;
@@ -205,8 +208,8 @@ export class Store {
     }
   }
 
-  /** Read-modify-write under the lock. Expired intents are swept on every pass. */
-  transact<T>(fn: (intents: Record<string, IntentRecord>, now: Date) => T): T {
+  /** Read-modify-write under the lock. Expired intents are swept on every pass. `halts` is the kill-switch state. */
+  transact<T>(fn: (intents: Record<string, IntentRecord>, now: Date, halts: Halts) => T): T {
     return this.withLock(() => {
       const state = this.read();
       const now = new Date();
@@ -216,7 +219,7 @@ export class Store {
           rec.updated_at = now.toISOString();
         }
       }
-      const result = fn(state.intents, now);
+      const result = fn(state.intents, now, (state.halts ??= {}));
       this.write(state);
       return result;
     });

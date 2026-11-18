@@ -206,6 +206,26 @@ const PolicySchema = z.object({
       require_approval: ["accept_dispute_claim", "cancel_subscription", "cancel_sent_invoice", "update_subscription"],
       deny: [],
     }),
+  /**
+   * Stop agents spending. A human can halt one agent or all of them (pursestring halt, POST /halt); loop detection
+   * halts an agent on its own when it keeps asking for the same purchase under new task IDs. While halted, new
+   * intents are denied, approved intents can't be paid or get a card, and real-time card authorizations decline.
+   */
+  kill_switch: z
+    .object({
+      loop_detection: z
+        .object({
+          enabled: z.boolean().default(true),
+          /** How far back to look for repeats. */
+          window_minutes: z.number().positive().default(10),
+          /** The intent that makes this many near-identical ones inside the window halts the agent. */
+          max_similar: z.number().int().min(2).default(5),
+          /** Amounts this close count as the same purchase: 10 means 15.00 and 16.50 match. */
+          amount_tolerance_percent: z.number().nonnegative().max(100).default(10),
+        })
+        .default({ enabled: true, window_minutes: 10, max_similar: 5, amount_tolerance_percent: 10 }),
+    })
+    .default({ loop_detection: { enabled: true, window_minutes: 10, max_similar: 5, amount_tolerance_percent: 10 } }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z
