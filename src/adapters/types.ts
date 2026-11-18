@@ -34,9 +34,10 @@ export interface CardAdapter {
   readonly name: string;
   /**
    * "card" rails mint virtual cards; "payout" rails send money straight to the vendor's account on file
-   * (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury); "bank_transfer" rails move money by ACH / wire / SEPA.
+   * (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury); "bank_transfer" rails move money by ACH / wire / SEPA;
+   * "x402" pays an HTTP 402 resource in USDC (see src/x402.ts).
    */
-  readonly kind: "card" | "payout" | "bank_transfer";
+  readonly kind: "card" | "payout" | "bank_transfer" | "x402";
   issueCard(req: IssueCardRequest): Promise<CardDetails>;
   /** Re-fetch full card details from a stored reference, used to replay idempotent requests. */
   getCard(ref: CardReference): Promise<CardDetails>;

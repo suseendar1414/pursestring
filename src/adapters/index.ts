@@ -8,6 +8,7 @@ import { planned } from "./planned.js";
 import { PrivacyAdapter } from "./privacy.js";
 import { RazorpayXAdapter } from "./razorpayx.js";
 import { StripeConnectAdapter } from "./stripe-connect.js";
+import { X402Rail } from "./x402.js";
 import type { CardAdapter } from "./types.js";
 
 export type { CardAdapter, IssueCardRequest, PayoutRequest, PayoutResult } from "./types.js";
@@ -92,6 +93,8 @@ export class Rails {
           paymentType: this.config.policy.adapter.modern_treasury.payment_type,
         });
       }
+      case "x402":
+        return new X402Rail();
       case "highnote":
       case "marqeta":
       case "amex":

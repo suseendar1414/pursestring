@@ -121,3 +121,10 @@ kill_switch:
     window_minutes: 10
     max_similar: 5                # the 5th near-identical intent in 10 minutes halts the agent
     amount_tolerance_percent: 10
+
+# Pay for HTTP APIs that charge per request with 402 Payment Required (x402), in USDC from the wallet in
+# X402_PRIVATE_KEY. Each payment is a purchase intent under this same policy. See docs/x402.md.
+x402:
+  enabled: false
+  networks: ["eip155:84532"]      # Base Sepolia testnet; add "eip155:8453" for Base (real USDC)
+  pay_to: []                      # optional pins: - { vendor: api.example.com, address: "0x..." }

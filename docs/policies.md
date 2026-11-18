@@ -148,6 +148,10 @@ payees:
 
 `highnote`, `marqeta`, `amex`, `network_token` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
 
+## x402
+
+`x402_fetch` pays for HTTP resources that answer `402 Payment Required`, in USDC. Each payment becomes a purchase intent for the URL's host and goes through every rule on this page. Off by default; see [x402.md](x402.md).
+
 ## Kill switch and loop detection
 
 A halt stops an agent's spending at once, whatever was approved before it:

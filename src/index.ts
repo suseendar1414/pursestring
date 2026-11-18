@@ -62,6 +62,7 @@ Environment:
                        Enable the razorpayx rail (INR payouts to a vendor's fund account; test keys only by default)
   MODERN_TREASURY_ORGANIZATION_ID, MODERN_TREASURY_API_KEY, MODERN_TREASURY_ORIGINATING_ACCOUNT_ID
                        Enable the modern_treasury rail (ACH payment orders to a vendor's external account)
+  X402_PRIVATE_KEY     Wallet key that signs x402 USDC payments (with x402.enabled in policies.yaml)
   PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
                           PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode

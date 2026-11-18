@@ -226,6 +226,25 @@ const PolicySchema = z.object({
         .default({ enabled: true, window_minutes: 10, max_similar: 5, amount_tolerance_percent: 10 }),
     })
     .default({ loop_detection: { enabled: true, window_minutes: 10, max_similar: 5, amount_tolerance_percent: 10 } }),
+  /**
+   * Pay for HTTP resources that answer 402 Payment Required (x402), in USDC from the wallet in X402_PRIVATE_KEY.
+   * Every payment is a purchase intent like any other: same budgets, allowlist, approvals, kill switch and audit log.
+   */
+  x402: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** CAIP-2 networks PurseString may pay on. Base Sepolia (testnet) by default; add eip155:8453 for Base (real USDC). */
+      networks: z.array(z.string().regex(/^eip155:\d+$/)).default(["eip155:84532"]),
+      /** Optional: pin the address each vendor may be paid at. A vendor listed here can't be paid anywhere else. */
+      pay_to: z
+        .array(z.object({ vendor: z.string().min(1), address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }))
+        .default([]),
+      /** Longest authorization PurseString will sign, whatever the server asks for. */
+      max_timeout_seconds: z.number().int().positive().default(300),
+      /** Response bodies longer than this are cut before they're returned to the agent. */
+      max_response_bytes: z.number().int().positive().default(100_000),
+    })
+    .default({ enabled: false, networks: ["eip155:84532"], pay_to: [], max_timeout_seconds: 300, max_response_bytes: 100_000 }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z
@@ -267,6 +286,8 @@ export interface Config {
     modernTreasuryOrgId?: string;
     modernTreasuryApiKey?: string;
     modernTreasuryOriginatingAccountId?: string;
+    /** Private key of the wallet that signs x402 payments. Never logged or stored. */
+    x402PrivateKey?: string;
     /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
     lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
@@ -328,6 +349,7 @@ export function loadConfig(): Config {
     razorpayxAccountNumber: process.env.RAZORPAYX_ACCOUNT_NUMBER || policy.adapter.razorpayx.account_number,
     modernTreasuryOrgId: process.env.MODERN_TREASURY_ORGANIZATION_ID || undefined,
     modernTreasuryApiKey: process.env.MODERN_TREASURY_API_KEY || undefined,
+    x402PrivateKey: process.env.X402_PRIVATE_KEY || undefined,
     modernTreasuryOriginatingAccountId:
       process.env.MODERN_TREASURY_ORIGINATING_ACCOUNT_ID || policy.adapter.modern_treasury.originating_account_id,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,

@@ -8,6 +8,15 @@ import { createHash } from "node:crypto";
 import { exponent, formatMinor, isWholeMinor, toMajor, toMinor } from "./money.js";
 import { cardCostMinor, holdStatus, openHoldMinor, usedMinor } from "./holds.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
+import {
+  atomicToCents,
+  paymentHeader,
+  parseChallenge,
+  parseSettlement,
+  unsupportedReason,
+  X402Wallet,
+  type X402Requirement,
+} from "./x402.js";
 import type {
   ActionRecord,
   AuthorizationRecord,
@@ -19,6 +28,7 @@ import type {
   PurchaseIntent,
   RefundRecord,
   RefundStatus,
+  X402Record,
 } from "./types.js";
 
 export class GovernanceError extends Error {
@@ -190,6 +200,38 @@ export interface SettlementResult {
   still_held?: number;
 }
 
+export interface X402FetchInput {
+  agent_id: string;
+  task_id: string;
+  task_goal: string;
+  url: string;
+  method?: "GET" | "POST";
+  /** Request body for POST, sent as is. */
+  body?: string;
+  content_type?: string;
+  alternatives_attempted?: string[];
+  reasoning?: string[];
+  /** Set when repeating a call that was paused for approval. */
+  intent_id?: string;
+}
+
+export interface X402Response {
+  status: number;
+  content_type?: string;
+  body: string;
+  truncated: boolean;
+}
+
+export interface X402FetchResult {
+  /** True when this call (or an earlier one, if replayed) paid. False for free resources and paused intents. */
+  paid: boolean;
+  /** True when the intent was already paid and the stored response was returned; nothing was paid again. */
+  replayed: boolean;
+  record?: IntentRecord;
+  response?: X402Response;
+  transaction?: string;
+}
+
 /** The currency an intent's money moved in: its card's, else what the agent asked for. */
 const recordCurrency = (rec: IntentRecord) => rec.card?.currency ?? rec.intent.currency;
 
@@ -277,7 +319,11 @@ export class Governance {
       : evaluate(this.config.policy, intent, { spentTodayByAgent: spent });
   }
 
-  async submitIntent(intent: PurchaseIntent, action?: ActionRecord): Promise<SubmitResult> {
+  async submitIntent(
+    intent: PurchaseIntent,
+    action?: ActionRecord,
+    extra: { rail?: string; x402?: X402Record } = {},
+  ): Promise<SubmitResult> {
     checkAmount(intent);
     const key = idempotencyKey(intent);
     let approvalCode: string | undefined;
@@ -326,7 +372,7 @@ export class Governance {
       const status =
         evaluation.decision === "auto_approve" ? "approved" : evaluation.decision === "deny" ? "denied" : "pending_approval";
       const ts = now.toISOString();
-      const rail = action ? "paypal" : routeRail(this.config.policy, intent).rail;
+      const rail = action ? "paypal" : (extra.rail ?? routeRail(this.config.policy, intent).rail);
       const record: IntentRecord = {
         intent_id: intentId,
         idempotency_key: key,
@@ -338,6 +384,7 @@ export class Governance {
         expires_at: new Date(now.getTime() + this.config.policy.approvals.ttl_minutes * 60_000).toISOString(),
         rail,
         ...(action ? { action } : {}),
+        ...(extra.x402 ? { x402: extra.x402 } : {}),
         ...(status === "approved" ? { approved_by: "policy:auto_approve" } : {}),
         ...(status === "denied" ? { denied_by: "policy" } : {}),
       };
@@ -372,6 +419,9 @@ export class Governance {
           summary: record.evaluation.summary,
           rail: record.rail,
           ...(action ? { paypal_tool: action.tool, paypal_args: action.args } : {}),
+          ...(extra.x402
+            ? { x402: { url: extra.x402.url, network: extra.x402.network, pay_to: extra.x402.pay_to, amount_atomic: extra.x402.amount_atomic } }
+            : {}),
         },
         status: record.status,
         policy_file: this.config.policyPath,
@@ -442,6 +492,9 @@ export class Governance {
           "Bank transfers aren't supported yet; ask a human to pay this one.",
         "bank_transfer_rail",
       );
+    }
+    if (existing && this.railFor(existing).kind === "x402") {
+      throw new GovernanceError(`${intentId} pays an x402 resource. Call x402_fetch with this intent_id.`, "x402_rail");
     }
     if (existing && this.railFor(existing).kind === "payout") {
       throw new GovernanceError(
@@ -560,7 +613,8 @@ export class Governance {
     if (adapter.kind !== "payout" || !adapter.sendPayout) {
       throw new GovernanceError(
         `Policy routes ${intentId} to the '${existing.rail}' ${adapter.kind} rail, which doesn't pay vendors directly.` +
-          (adapter.kind === "card" ? " Call request_ephemeral_card instead." : ""),
+          (adapter.kind === "card" ? " Call request_ephemeral_card instead." : "") +
+          (adapter.kind === "x402" ? " Call x402_fetch with this intent_id instead." : ""),
         "not_payout_rail",
       );
     }
@@ -775,6 +829,258 @@ export class Governance {
       approved_by: record.approved_by,
     });
     return { record, result, replayed: false };
+  }
+
+  private wallet?: X402Wallet;
+  private x402Wallet(): X402Wallet {
+    if (!this.config.env.x402PrivateKey) {
+      throw new GovernanceError("x402 payments need a wallet: set X402_PRIVATE_KEY.", "x402_not_configured");
+    }
+    return (this.wallet ??= new X402Wallet(this.config.env.x402PrivateKey));
+  }
+
+  private async readResponse(res: Response): Promise<X402Response> {
+    const buf = Buffer.from(await res.arrayBuffer());
+    const max = this.config.policy.x402.max_response_bytes;
+    return {
+      status: res.status,
+      content_type: res.headers.get("content-type") ?? undefined,
+      body: buf.subarray(0, max).toString("utf8"),
+      truncated: buf.length > max,
+    };
+  }
+
+  /**
+   * Fetch a URL that may charge over x402. A free answer is returned as is. A 402 becomes a purchase intent for the
+   * exact price, ruled on like any other: auto-approved ones are paid at once, others wait for a human (repeat the
+   * call with the intent_id once approved), and denials pay nothing. Each intent signs at most one authorization and
+   * a retry re-sends that same one, whose nonce can settle on chain only once, so a retried call can't pay twice.
+   */
+  async x402Fetch(input: X402FetchInput): Promise<X402FetchResult> {
+    const cfg = this.config.policy.x402;
+    if (!cfg.enabled) throw new GovernanceError("x402 payments are off. Set x402.enabled: true in policies.yaml.", "x402_disabled");
+    let url: URL;
+    try {
+      url = new URL(input.url);
+    } catch {
+      throw new GovernanceError(`${input.url} isn't a URL.`, "bad_url");
+    }
+    if (url.protocol !== "https:") throw new GovernanceError("x402 resources must be https.", "bad_url");
+    const method = input.method ?? "GET";
+    const request = (headers: Record<string, string> = {}) =>
+      fetch(url, {
+        method,
+        redirect: "manual",
+        headers: { ...(input.content_type ? { "Content-Type": input.content_type } : {}), ...headers },
+        body: method === "POST" ? input.body : undefined,
+      });
+
+    let rec: IntentRecord | undefined;
+    if (input.intent_id) {
+      rec = this.store.get(input.intent_id);
+      if (!rec?.x402) throw new GovernanceError(`No x402 intent ${input.intent_id}.`, "not_found");
+      if (rec.x402.url !== url.href) {
+        throw new GovernanceError(`Intent ${input.intent_id} is for ${rec.x402.url}, not ${url.href}.`, "url_mismatch");
+      }
+      if (rec.status === "paid") return this.x402Replay(rec);
+    }
+
+    // A previously signed authorization is re-sent as is: no need to ask the server for the price again.
+    if (rec?.x402?.authorization) return this.x402Pay(rec.intent_id, request, undefined);
+
+    const first = await request();
+    if (first.status !== 402) {
+      if (rec) throw new GovernanceError(`${url.href} no longer asks for payment (HTTP ${first.status}). Nothing was paid.`, "not_402");
+      return { paid: false, replayed: false, response: await this.readResponse(first) };
+    }
+    const bodyText = await first.text();
+    const challenge = parseChallenge(first.headers, bodyText);
+    if (!challenge || challenge.accepts.length === 0) {
+      throw new GovernanceError(`${url.href} answered 402 but not with an x402 payment request PurseString can read.`, "not_x402");
+    }
+    const vendor = normalizeDomain(url.hostname);
+    const pins = cfg.pay_to.filter((p) => domainMatches(vendor, p.vendor));
+    const reasons: string[] = [];
+    const usable = challenge.accepts.filter((r) => {
+      const why = unsupportedReason(r, cfg.networks) ??
+        (pins.length && !pins.some((p) => p.address.toLowerCase() === r.pay_to.toLowerCase())
+          ? `payTo ${r.pay_to} isn't the address pinned for ${vendor} in x402.pay_to`
+          : null);
+      if (why) reasons.push(why);
+      return !why;
+    });
+
+    let requirement: X402Requirement | undefined;
+    if (rec) {
+      // Repeating a paused call: pay only exactly what was approved.
+      const x = rec.x402!;
+      requirement = usable.find(
+        (r) => r.network === x.network && r.asset.toLowerCase() === x.asset.toLowerCase() && r.pay_to.toLowerCase() === x.pay_to.toLowerCase() && r.amount === x.amount_atomic,
+      );
+      if (!requirement) {
+        throw new GovernanceError(
+          `${url.href} now asks for something other than what ${rec.intent_id} approved. Nothing was paid; call x402_fetch without intent_id to get a new decision.`,
+          "price_changed",
+        );
+      }
+    } else {
+      // Cheapest usable option.
+      requirement = usable.sort((a, b) => (BigInt(a.amount) < BigInt(b.amount) ? -1 : 1))[0];
+      if (!requirement) {
+        this.store.audit("x402_unpayable", { url: url.href, agent_id: input.agent_id, reasons });
+        throw new GovernanceError(`PurseString can't pay ${url.href}: ${reasons.join("; ")}.`, "x402_unsupported");
+      }
+      const cents = atomicToCents(requirement.amount);
+      const intent: PurchaseIntent = {
+        agent_id: input.agent_id,
+        task_id: input.task_id,
+        task_goal: input.task_goal,
+        vendor_domain: vendor,
+        amount: toMajor(cents, "USD"),
+        currency: "USD",
+        is_recurring: false,
+        alternatives_attempted: input.alternatives_attempted ?? [],
+        reasoning: input.reasoning ?? [],
+      };
+      const x402: X402Record = {
+        url: url.href,
+        method,
+        network: requirement.network,
+        asset: requirement.asset,
+        pay_to: requirement.pay_to,
+        amount_atomic: requirement.amount,
+      };
+      rec = (await this.submitIntent(intent, undefined, { rail: "x402", x402 })).record;
+      if (rec.status === "paid") return this.x402Replay(rec);
+      if (!rec.x402 || rec.x402.pay_to.toLowerCase() !== requirement.pay_to.toLowerCase() || rec.x402.amount_atomic !== requirement.amount) {
+        throw new GovernanceError(
+          `${rec.intent_id} already exists for this task with different payment terms. Use a new task_id.`,
+          "intent_conflict",
+        );
+      }
+    }
+    if (rec.status !== "approved") return { paid: false, replayed: false, record: rec };
+    return this.x402Pay(rec.intent_id, request, { requirement, resource: challenge.resource });
+  }
+
+  private x402Replay(rec: IntentRecord): X402FetchResult {
+    this.store.audit("payment_replayed", {
+      intent_id: rec.intent_id,
+      payment_id: rec.payment?.payment_id,
+      note: "x402 resource already paid: returned the stored response, nothing paid again.",
+    });
+    return { paid: true, replayed: true, record: rec, response: rec.x402?.response, transaction: rec.x402?.transaction };
+  }
+
+  private async x402Pay(
+    intentId: string,
+    request: (headers: Record<string, string>) => Promise<Response>,
+    fresh: { requirement: X402Requirement; resource: unknown } | undefined,
+  ): Promise<X402FetchResult> {
+    type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; header: { name: string; value: string } };
+    const claim = this.store.transact((intents, now, halts): Claim => {
+      const rec = intents[intentId];
+      if (rec.status === "paid") return { kind: "replay", record: rec };
+      this.assertNotHalted(rec, halts);
+      if (rec.status === "paying" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
+        throw new GovernanceError(`A payment for ${intentId} is being sent right now. Retry in a few seconds.`, "in_progress");
+      }
+      if (rec.status !== "paying") this.assertSpendable(rec, intents, now, halts);
+      const x = rec.x402!;
+      let header: { name: string; value: string };
+      if (x.authorization) {
+        if (new Date(Number(x.authorization.valid_before) * 1000) <= now) {
+          throw new GovernanceError(
+            `The payment authorization for ${intentId} expired at ${new Date(Number(x.authorization.valid_before) * 1000).toISOString()}. ` +
+              `If it never settled (check nonce ${x.authorization.nonce} on ${x.network}), submit a new intent with a new task_id.`,
+            "authorization_expired",
+          );
+        }
+        header = x.authorization.header;
+      } else {
+        if (!fresh) throw new GovernanceError(`No payment terms for ${intentId}.`, "not_found");
+        const cap = this.config.policy.x402.max_timeout_seconds;
+        const r = { ...fresh.requirement, max_timeout_seconds: Math.min(fresh.requirement.max_timeout_seconds, cap) };
+        const signed = this.x402Wallet().authorize(r, now);
+        header = paymentHeader(r, fresh.resource, signed);
+        x.authorization = {
+          signature: signed.signature,
+          nonce: signed.authorization.nonce,
+          valid_before: signed.authorization.validBefore,
+          from: signed.authorization.from,
+          header,
+        };
+      }
+      rec.status = "paying";
+      rec.updated_at = now.toISOString();
+      return { kind: "pay", record: rec, header };
+    });
+    if (claim.kind === "replay") return this.x402Replay(claim.record);
+
+    const revert = () =>
+      this.store.transact((intents, now) => {
+        intents[intentId].status = "approved";
+        intents[intentId].updated_at = now.toISOString();
+        return intents[intentId];
+      });
+    let res: Response;
+    try {
+      res = await request({ [claim.header.name]: claim.header.value });
+    } catch (err) {
+      revert();
+      this.store.audit("payment_failed", { intent_id: intentId, adapter: "x402", error: String(err) });
+      throw new GovernanceError(`x402 request failed: ${(err as Error).message}. Retrying re-sends the same authorization.`, "adapter_error");
+    }
+    const settlement = parseSettlement(res.headers);
+    const response = await this.readResponse(res);
+    if (!res.ok || settlement?.success === false) {
+      revert();
+      this.store.audit("payment_failed", {
+        intent_id: intentId,
+        adapter: "x402",
+        http_status: res.status,
+        reason: settlement?.errorReason,
+      });
+      throw new GovernanceError(
+        `The server didn't accept the payment for ${intentId} (HTTP ${res.status}${settlement?.errorReason ? `, ${settlement.errorReason}` : ""}). ` +
+          "Retrying re-sends the same authorization, so it can't pay twice.",
+        "payment_refused",
+      );
+    }
+    const record = this.store.transact((intents, now) => {
+      const r = intents[intentId];
+      const x = r.x402!;
+      r.status = "paid";
+      r.updated_at = now.toISOString();
+      x.paid_at = now.toISOString();
+      if (settlement?.transaction) x.transaction = settlement.transaction;
+      x.response = response;
+      r.payment = {
+        adapter: "x402",
+        payment_id: settlement?.transaction || x.authorization!.nonce,
+        status: settlement?.transaction ? "settled" : "accepted",
+        amount: r.intent.amount,
+        currency: "USD",
+        payee: {},
+        paid_to: x.pay_to,
+        sent_at: now.toISOString(),
+      };
+      return r;
+    });
+    this.store.audit("payment_sent", {
+      intent_id: intentId,
+      adapter: "x402",
+      payment_id: record.payment!.payment_id,
+      network: record.x402!.network,
+      asset: record.x402!.asset,
+      paid_to: record.x402!.pay_to,
+      amount_atomic: record.x402!.amount_atomic,
+      amount: record.intent.amount,
+      currency: "USD",
+      from: record.x402!.authorization!.from,
+      approved_by: record.approved_by,
+    });
+    return { paid: true, replayed: false, record, response, transaction: record.x402!.transaction };
   }
 
   /** The kill switch's current state: every halt still in force. */
