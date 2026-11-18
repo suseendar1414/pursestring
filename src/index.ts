@@ -51,6 +51,11 @@ Environment:
                        Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET
                        Enable the paypal rail (pays vendors' PayPal or Venmo accounts on file; sandbox by default)
+  STRIPE_SECRET_KEY    Enables the stripe_connect rail (transfers to a vendor's connected account; test keys only by default)
+  RAZORPAYX_KEY_ID, RAZORPAYX_KEY_SECRET, RAZORPAYX_ACCOUNT_NUMBER
+                       Enable the razorpayx rail (INR payouts to a vendor's fund account; test keys only by default)
+  MODERN_TREASURY_ORGANIZATION_ID, MODERN_TREASURY_API_KEY, MODERN_TREASURY_ORIGINATING_ACCOUNT_ID
+                       Enable the modern_treasury rail (ACH payment orders to a vendor's external account)
   PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
                           PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode

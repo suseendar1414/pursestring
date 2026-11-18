@@ -27,6 +27,7 @@ const ZERO_DECIMAL = new Set(["HUF", "JPY", "TWD"]);
 export class PayPalAdapter implements CardAdapter {
   readonly name = "paypal";
   readonly kind = "payout" as const;
+  readonly payeeField = "receiver" as const;
   private readonly baseUrl: string;
   private token?: { value: string; expiresAt: number };
 
@@ -88,8 +89,8 @@ export class PayPalAdapter implements CardAdapter {
         },
         items: [
           {
-            recipient_type: req.payee.type,
-            recipient_wallet: req.payee.wallet,
+            recipient_type: req.payee.type ?? "EMAIL",
+            recipient_wallet: req.payee.wallet ?? "PAYPAL",
             receiver: req.payee.receiver,
             amount: { value, currency: req.currency.toUpperCase() },
             note: req.note.slice(0, 4000),

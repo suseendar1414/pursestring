@@ -493,7 +493,7 @@ export class Governance {
   }
 
   /**
-   * Pay an approved intent through a payout rail (PayPal, Venmo). The money goes to the vendor's account from the
+   * Pay an approved intent through a payout rail (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury). The money goes to the vendor's account from the
    * payee directory in policies.yaml, never to an address the agent supplies. An intent is paid at most once:
    * calling again returns the existing payment, and the rail itself is told the intent ID so a crash mid-call
    * can't double-pay on retry either.
@@ -525,17 +525,21 @@ export class Governance {
           "recurring_not_supported",
         );
       }
-      const entry = this.config.policy.payees.find((p) => domainMatches(rec.intent.vendor_domain, p.vendor));
+      // The first payee entry for this vendor that has a destination this rail can pay.
+      const field = adapter.payeeField ?? "receiver";
+      const entry = this.config.policy.payees.find((p) => domainMatches(rec.intent.vendor_domain, p.vendor) && p[field]);
       if (!entry) {
         throw new GovernanceError(
-          `No payee on file for ${normalizeDomain(rec.intent.vendor_domain)}, so PurseString doesn't know where to send the money. ` +
+          `No payee on file for ${normalizeDomain(rec.intent.vendor_domain)} on the '${adapter.name}' rail (it pays to a payee's ` +
+            `${field}), so PurseString doesn't know where to send the money. ` +
             "Ask a human to add the vendor to payees in policies.yaml. Do not pay another way.",
           "no_payee",
         );
       }
       rec.status = "paying";
       rec.updated_at = now.toISOString();
-      return { kind: "pay", record: rec, payee: { receiver: entry.receiver, type: entry.type, wallet: entry.wallet } };
+      const { vendor: _vendor, ...payee } = entry;
+      return { kind: "pay", record: rec, payee };
     });
 
     if (claim.kind === "replay") {
@@ -592,6 +596,7 @@ export class Governance {
         amount: r.intent.amount,
         currency: r.intent.currency,
         payee: claim.payee,
+        paid_to: claim.payee[adapter.payeeField ?? "receiver"],
         sent_at: now.toISOString(),
       };
       return r;
@@ -604,6 +609,7 @@ export class Governance {
       amount: rec.intent.amount,
       currency: rec.intent.currency,
       payee: claim.payee,
+      paid_to: updated.payment!.paid_to,
       approved_by: updated.approved_by,
     });
     return { payment: updated.payment!, record: updated, replayed: false };

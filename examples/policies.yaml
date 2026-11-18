@@ -60,14 +60,27 @@ adapter:
     # cardholder_id: ...          # or AIRWALLEX_CARDHOLDER_ID; agent cards are issued to this cardholder
   paypal:
     environment: sandbox          # api-m.sandbox.paypal.com; no real money
+  stripe_connect:
+    environment: sandbox          # only test-mode keys (sk_test_) are accepted
+  razorpayx:
+    environment: sandbox          # only test-mode keys (rzp_test_) are accepted
+    mode: IMPS                    # IMPS | NEFT | RTGS | UPI
+  modern_treasury:
+    payment_type: ach             # ach | wire | rtp | ...
 
-# Where the paypal rail sends money for each vendor. The agent never picks the recipient,
+# Where payout rails (paypal, stripe_connect, razorpayx, modern_treasury) send money for each vendor. The agent never picks the recipient,
 # so a vendor with no entry here can't be paid by payout. See docs/paypal.md.
 payees: []
 #  - vendor: pdfocr.io
 #    receiver: billing@pdfocr.io   # PayPal email, phone or PayPal account ID
 #    type: EMAIL                   # EMAIL | PHONE | PAYPAL_ID
 #    wallet: PAYPAL                # PAYPAL | VENMO (Venmo pays to a US phone number)
+#  - vendor: pdfocr.io
+#    stripe_account: acct_123      # stripe_connect: the vendor's connected account
+#  - vendor: gstfiling.in
+#    razorpayx_fund_account: fa_123  # razorpayx: the vendor's fund account
+#  - vendor: acme-supplies.com
+#    modern_treasury_account: ea_id  # modern_treasury: the vendor's external account ID
 
 # Run PayPal's own MCP server (@paypal/mcp) behind PurseString. Read-only tools pass through;
 # refunds, dispute acceptance and cancellations go through policy first. See docs/paypal.md.

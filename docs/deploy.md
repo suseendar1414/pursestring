@@ -268,6 +268,9 @@ Refunds in the demo always go to a built-in stand-in for PayPal's MCP server wit
 | `REFUND_WEBHOOK_URL` | unset | Your own URL to receive signed `intent.refunded` events |
 | `REFUND_WEBHOOK_SECRET` | unset | Signs the events sent to `REFUND_WEBHOOK_URL` (Standard Webhooks) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | unset | PayPal payouts and governing PayPal's MCP server. See [paypal.md](paypal.md) |
+| `STRIPE_SECRET_KEY` | unset | Enables the `stripe_connect` payout rail. See [policies.md](policies.md#rail-routing) |
+| `RAZORPAYX_KEY_ID`, `RAZORPAYX_KEY_SECRET`, `RAZORPAYX_ACCOUNT_NUMBER` | unset | Enable the `razorpayx` payout rail (INR) |
+| `MODERN_TREASURY_ORGANIZATION_ID`, `MODERN_TREASURY_API_KEY`, `MODERN_TREASURY_ORIGINATING_ACCOUNT_ID` | unset | Enable the `modern_treasury` payout rail (ACH by default) |
 | `PURSESTRING_DEMO` | unset | `1` serves the public demo at `/demo` in HTTP mode |
 | `DEMO_PAYEE_EMAIL` | `vendor@pdfocr.example` | Who receives the demo's sandbox payouts |
 | `PURSESTRING_ADAPTER` | from policy | Force the default rail |

@@ -73,7 +73,7 @@ function view(gov: Governance, rec: IntentRecord) {
     expires_at: rec.expires_at,
     card_last_four: rec.card?.last_four,
     payment: rec.payment
-      ? { payment_id: rec.payment.payment_id, status: rec.payment.status, paid_to: rec.payment.payee.receiver }
+      ? { payment_id: rec.payment.payment_id, status: rec.payment.status, paid_to: rec.payment.paid_to ?? rec.payment.payee.receiver }
       : undefined,
     ...(rec.refund_status
       ? {
@@ -306,7 +306,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     {
       title: "Send payment",
       description:
-        "Pay an approved intent through a payout rail (PayPal or Venmo). The approved amount goes to the vendor's " +
+        "Pay an approved intent through a payout rail (PayPal, Venmo, Stripe Connect, RazorpayX or Modern Treasury). The approved amount goes to the vendor's " +
         "account on file in the policy; you can't choose the recipient. Each intent is paid at most once: calling " +
         "again returns the existing payment, so it is safe to retry.",
       inputSchema: { intent_id: z.string().describe("The intent_id returned by submit_purchase_intent.") },
@@ -326,8 +326,8 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
             status: payment.status,
             amount: payment.amount,
             currency: payment.currency,
-            paid_to: payment.payee.receiver,
-            wallet: payment.payee.wallet,
+            paid_to: payment.paid_to ?? payment.payee.receiver,
+            ...(payment.adapter === "paypal" ? { wallet: payment.payee.wallet } : {}),
             rail: payment.adapter,
             sent_at: payment.sent_at,
           },

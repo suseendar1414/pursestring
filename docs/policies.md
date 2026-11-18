@@ -75,7 +75,7 @@ adapter:
   paypal:
     environment: sandbox          # sandbox | production
 
-payees: []                        # where the paypal rail sends money, per vendor (see below)
+payees: []                        # where payout rails send money, per vendor (see below)
 
 routes: []                        # see "Rail routing" below
 
@@ -114,6 +114,29 @@ payees:
     receiver: billing@pdfocr.io   # PayPal email, phone or PayPal account ID
     type: EMAIL                   # EMAIL | PHONE | PAYPAL_ID
     wallet: PAYPAL                # PAYPAL | VENMO
+```
+
+Three more payout rails work the same way: the agent calls `send_payment`, the money goes only to the destination on file under `payees`, and each intent is paid at most once (the intent ID is the provider's idempotency key). Each rail reads its own field on a payee entry, so one vendor can have entries for several rails; the first entry for the vendor that has the rail's field is used. None of them has been run against a live account yet: they're built from each provider's API reference and tested against stubbed responses.
+
+| Rail | Pays | Payee field | Credentials |
+|---|---|---|---|
+| `stripe_connect` | A [Stripe Connect transfer](https://docs.stripe.com/api/transfers/create) from your platform balance to the vendor's connected account. Stripe pays that account out to its bank on its own schedule. | `stripe_account: acct_...` | `STRIPE_SECRET_KEY`. Only test-mode keys (`sk_test_`, `rk_test_`) unless `adapter.stripe_connect.environment: production`. |
+| `razorpayx` | A [RazorpayX payout](https://razorpay.com/docs/api/x/payouts/) in INR from your RazorpayX account to the vendor's bank account or UPI ID. Low-balance payouts fail instead of queueing. | `razorpayx_fund_account: fa_...` | `RAZORPAYX_KEY_ID`, `RAZORPAYX_KEY_SECRET`, `RAZORPAYX_ACCOUNT_NUMBER` (or `adapter.razorpayx.account_number`). Only `rzp_test_` keys unless `adapter.razorpayx.environment: production`. `adapter.razorpayx.mode` is `IMPS` by default (`NEFT`, `RTGS`, `UPI`). |
+| `modern_treasury` | A [Modern Treasury payment order](https://docs.moderntreasury.com/payments/reference/create-payment-order) (ACH credit by default) from your internal account to the vendor's external account. | `modern_treasury_account: <external account ID>` | `MODERN_TREASURY_ORGANIZATION_ID`, `MODERN_TREASURY_API_KEY`, `MODERN_TREASURY_ORIGINATING_ACCOUNT_ID` (or `adapter.modern_treasury.originating_account_id`). `adapter.modern_treasury.payment_type` is `ach` by default. Whether real money moves depends on the organization: use a sandbox organization to test. |
+
+```yaml
+routes:
+  - rail: stripe_connect
+    vendors: ["pdfocr.io"]
+  - rail: razorpayx
+    vendors: ["*.in"]
+payees:
+  - vendor: pdfocr.io
+    stripe_account: acct_1Nv0FGQ9RKHgCVdK
+  - vendor: gstfiling.in
+    razorpayx_fund_account: fa_00000000000001
+  - vendor: acme-supplies.com
+    modern_treasury_account: 0f8e3719-3dfd-4613-9bbf-c0333781b59f
 ```
 
 `highnote`, `marqeta`, `amex`, `network_token` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.

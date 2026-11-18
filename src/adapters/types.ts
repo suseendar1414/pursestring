@@ -1,4 +1,4 @@
-import type { CardDetails, CardReference, Payee } from "../types.js";
+import type { CardDetails, CardReference, Payee, PayeeDestinationField } from "../types.js";
 
 export interface IssueCardRequest {
   intent_id: string;
@@ -34,7 +34,7 @@ export interface CardAdapter {
   readonly name: string;
   /**
    * "card" rails mint virtual cards; "payout" rails send money straight to the vendor's account on file
-   * (PayPal, Venmo); "bank_transfer" rails move money by ACH / wire / SEPA.
+   * (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury); "bank_transfer" rails move money by ACH / wire / SEPA.
    */
   readonly kind: "card" | "payout" | "bank_transfer";
   issueCard(req: IssueCardRequest): Promise<CardDetails>;
@@ -42,6 +42,8 @@ export interface CardAdapter {
   getCard(ref: CardReference): Promise<CardDetails>;
   /** Close a card so it can't be used again. Called when a single-use card's time is up. */
   closeCard?(ref: CardReference): Promise<void>;
+  /** Payout rails: which payee field in policies.yaml holds this rail's destination. */
+  readonly payeeField?: PayeeDestinationField;
   /** Payout rails: send the approved amount to the payee. Must be idempotent on intent_id. */
   sendPayout?(req: PayoutRequest): Promise<PayoutResult>;
   /** Payout rails: the payment's current status. */

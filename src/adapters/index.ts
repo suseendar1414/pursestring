@@ -1,10 +1,13 @@
 import type { Config, RailName } from "../config.js";
 import { AirwallexAdapter } from "./airwallex.js";
 import { LithicAdapter } from "./lithic.js";
+import { ModernTreasuryAdapter } from "./modern-treasury.js";
 import { MockAdapter } from "./mock.js";
 import { PayPalAdapter } from "./paypal.js";
 import { planned } from "./planned.js";
 import { PrivacyAdapter } from "./privacy.js";
+import { RazorpayXAdapter } from "./razorpayx.js";
+import { StripeConnectAdapter } from "./stripe-connect.js";
 import type { CardAdapter } from "./types.js";
 
 export type { CardAdapter, IssueCardRequest, PayoutRequest, PayoutResult } from "./types.js";
@@ -57,6 +60,37 @@ export class Rails {
           throw new Error("A purchase was routed to 'paypal' but PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are not both set.");
         }
         return new PayPalAdapter({ clientId, clientSecret, environment: this.config.policy.adapter.paypal.environment });
+      }
+      case "stripe_connect": {
+        const key = this.config.env.stripeSecretKey;
+        if (!key) throw new Error("A purchase was routed to 'stripe_connect' but STRIPE_SECRET_KEY is not set.");
+        return new StripeConnectAdapter({ secretKey: key, environment: this.config.policy.adapter.stripe_connect.environment });
+      }
+      case "razorpayx": {
+        const { razorpayxKeyId: keyId, razorpayxKeySecret: keySecret, razorpayxAccountNumber: accountNumber } = this.config.env;
+        if (!keyId || !keySecret || !accountNumber) {
+          throw new Error(
+            "A purchase was routed to 'razorpayx' but RAZORPAYX_KEY_ID, RAZORPAYX_KEY_SECRET and RAZORPAYX_ACCOUNT_NUMBER are not all set.",
+          );
+        }
+        const rx = this.config.policy.adapter.razorpayx;
+        return new RazorpayXAdapter({ keyId, keySecret, accountNumber, mode: rx.mode, purpose: rx.purpose, environment: rx.environment });
+      }
+      case "modern_treasury": {
+        const { modernTreasuryOrgId: organizationId, modernTreasuryApiKey: apiKey, modernTreasuryOriginatingAccountId: originatingAccountId } =
+          this.config.env;
+        if (!organizationId || !apiKey || !originatingAccountId) {
+          throw new Error(
+            "A purchase was routed to 'modern_treasury' but MODERN_TREASURY_ORGANIZATION_ID, MODERN_TREASURY_API_KEY and " +
+              "MODERN_TREASURY_ORIGINATING_ACCOUNT_ID are not all set.",
+          );
+        }
+        return new ModernTreasuryAdapter({
+          organizationId,
+          apiKey,
+          originatingAccountId,
+          paymentType: this.config.policy.adapter.modern_treasury.payment_type,
+        });
       }
       case "highnote":
       case "marqeta":

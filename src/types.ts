@@ -150,12 +150,25 @@ export interface CardDetails extends CardReference {
 export type PayeeType = "EMAIL" | "PHONE" | "PAYPAL_ID";
 export type PayeeWallet = "PAYPAL" | "VENMO";
 
-/** Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent. */
+/**
+ * Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent.
+ * Each rail reads its own field: paypal `receiver` (with `type` and `wallet`), stripe_connect `stripe_account`,
+ * razorpayx `razorpayx_fund_account`, modern_treasury `modern_treasury_account`.
+ */
 export interface Payee {
-  receiver: string;
-  type: PayeeType;
-  wallet: PayeeWallet;
+  receiver?: string;
+  type?: PayeeType;
+  wallet?: PayeeWallet;
+  /** Stripe connected account ID (acct_...). */
+  stripe_account?: string;
+  /** RazorpayX fund account ID (fa_...). */
+  razorpayx_fund_account?: string;
+  /** Modern Treasury external account ID (the receiving account). */
+  modern_treasury_account?: string;
 }
+
+/** The payee fields a payout rail can pay to. */
+export type PayeeDestinationField = "receiver" | "stripe_account" | "razorpayx_fund_account" | "modern_treasury_account";
 
 /** What we persist about a payout. */
 export interface PaymentRecord {
@@ -167,6 +180,8 @@ export interface PaymentRecord {
   amount: number;
   currency: string;
   payee: Payee;
+  /** The account the money went to, as the rail names it: a PayPal email, acct_..., fa_..., an external account ID. */
+  paid_to?: string;
   sent_at: string;
 }
 
