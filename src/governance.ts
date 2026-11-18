@@ -2,11 +2,21 @@ import type { Rails } from "./adapters/index.js";
 import { hashApprovalCode, newApprovalCode, verifyApprovalCode, type ApprovalChannel } from "./approvals.js";
 import type { Config } from "./config.js";
 import type { Notifier, RefundNotice } from "./notify.js";
-import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel } from "./policy.js";
+import { activeHalt, haltKey, similarRecent, type HaltRecord, type Halts } from "./killswitch.js";
+import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel, withRule } from "./policy.js";
 import { createHash } from "node:crypto";
 import { exponent, formatMinor, isWholeMinor, toMajor, toMinor } from "./money.js";
 import { cardCostMinor, holdStatus, openHoldMinor, usedMinor } from "./holds.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
+import {
+  atomicToCents,
+  paymentHeader,
+  parseChallenge,
+  parseSettlement,
+  unsupportedReason,
+  X402Wallet,
+  type X402Requirement,
+} from "./x402.js";
 import type {
   ActionRecord,
   AuthorizationRecord,
@@ -18,6 +28,7 @@ import type {
   PurchaseIntent,
   RefundRecord,
   RefundStatus,
+  X402Record,
 } from "./types.js";
 
 export class GovernanceError extends Error {
@@ -116,7 +127,8 @@ export type AuthorizationCode =
   | "card_expired"
   | "already_used"
   | "over_amount"
-  | "merchant_mismatch";
+  | "merchant_mismatch"
+  | "halted";
 
 export interface AuthorizationDecision {
   approved: boolean;
@@ -186,6 +198,38 @@ export interface SettlementResult {
   captured?: number;
   released?: number;
   still_held?: number;
+}
+
+export interface X402FetchInput {
+  agent_id: string;
+  task_id: string;
+  task_goal: string;
+  url: string;
+  method?: "GET" | "POST";
+  /** Request body for POST, sent as is. */
+  body?: string;
+  content_type?: string;
+  alternatives_attempted?: string[];
+  reasoning?: string[];
+  /** Set when repeating a call that was paused for approval. */
+  intent_id?: string;
+}
+
+export interface X402Response {
+  status: number;
+  content_type?: string;
+  body: string;
+  truncated: boolean;
+}
+
+export interface X402FetchResult {
+  /** True when this call (or an earlier one, if replayed) paid. False for free resources and paused intents. */
+  paid: boolean;
+  /** True when the intent was already paid and the stored response was returned; nothing was paid again. */
+  replayed: boolean;
+  record?: IntentRecord;
+  response?: X402Response;
+  transaction?: string;
 }
 
 /** The currency an intent's money moved in: its card's, else what the agent asked for. */
@@ -275,21 +319,62 @@ export class Governance {
       : evaluate(this.config.policy, intent, { spentTodayByAgent: spent });
   }
 
-  async submitIntent(intent: PurchaseIntent, action?: ActionRecord): Promise<SubmitResult> {
+  async submitIntent(
+    intent: PurchaseIntent,
+    action?: ActionRecord,
+    extra: { rail?: string; x402?: X402Record } = {},
+  ): Promise<SubmitResult> {
     checkAmount(intent);
     const key = idempotencyKey(intent);
     let approvalCode: string | undefined;
-    const result = this.store.transact((intents, now): SubmitResult => {
+    let resumeCode: string | undefined;
+    let tripped: HaltRecord | undefined;
+    const result = this.store.transact((intents, now, halts): SubmitResult => {
       const existing = this.findRecent(intents, key, now);
       if (existing) return { record: existing, deduplicated: true };
 
-      const evaluation = this.evaluateRecord(intent, action, intents, now);
+      const intentId = this.store.newId();
+      let evaluation = this.evaluateRecord(intent, action, intents, now);
+      const halt = activeHalt(halts, intent.agent_id);
+      const ld = this.config.policy.kill_switch.loop_detection;
+      if (halt) {
+        evaluation = withRule(evaluation, {
+          rule: "kill_switch",
+          passed: false,
+          effect: "deny",
+          detail: `spending is halted for ${halt.scope === "all" ? "all agents" : intent.agent_id}: ${halt.reason}`,
+        });
+      } else if (ld.enabled && !action) {
+        // Checked in the same transaction as the write, so two racing requests can't both slip under the limit.
+        const prior = similarRecent(this.config.policy, intents, halts, intent, now);
+        if (prior.length + 1 >= ld.max_similar) {
+          const vendor = normalizeDomain(intent.vendor_domain);
+          const reason =
+            `loop detected: ${prior.length + 1} near-identical purchases (${vendor}, amounts within ` +
+            `${ld.amount_tolerance_percent}%) in ${ld.window_minutes} minutes under different task IDs`;
+          tripped = {
+            scope: "agent",
+            agent_id: intent.agent_id.trim(),
+            reason,
+            by: "policy:loop_detection",
+            via: "loop_detector",
+            tripped_at: now.toISOString(),
+            intent_ids: [...prior.map((r) => r.intent_id), intentId],
+          };
+          if (this.requireCode && this.canSendCode) {
+            resumeCode = newApprovalCode();
+            tripped.resume_code = hashApprovalCode(resumeCode);
+          }
+          halts[haltKey(intent.agent_id)] = tripped;
+          evaluation = withRule(evaluation, { rule: "kill_switch.loop_detection", passed: false, effect: "deny", detail: reason });
+        }
+      }
       const status =
         evaluation.decision === "auto_approve" ? "approved" : evaluation.decision === "deny" ? "denied" : "pending_approval";
       const ts = now.toISOString();
-      const rail = action ? "paypal" : routeRail(this.config.policy, intent).rail;
+      const rail = action ? "paypal" : (extra.rail ?? routeRail(this.config.policy, intent).rail);
       const record: IntentRecord = {
-        intent_id: this.store.newId(),
+        intent_id: intentId,
         idempotency_key: key,
         intent,
         evaluation,
@@ -299,6 +384,7 @@ export class Governance {
         expires_at: new Date(now.getTime() + this.config.policy.approvals.ttl_minutes * 60_000).toISOString(),
         rail,
         ...(action ? { action } : {}),
+        ...(extra.x402 ? { x402: extra.x402 } : {}),
         ...(status === "approved" ? { approved_by: "policy:auto_approve" } : {}),
         ...(status === "denied" ? { denied_by: "policy" } : {}),
       };
@@ -333,12 +419,16 @@ export class Governance {
           summary: record.evaluation.summary,
           rail: record.rail,
           ...(action ? { paypal_tool: action.tool, paypal_args: action.args } : {}),
+          ...(extra.x402
+            ? { x402: { url: extra.x402.url, network: extra.x402.network, pay_to: extra.x402.pay_to, amount_atomic: extra.x402.amount_atomic } }
+            : {}),
         },
         status: record.status,
         policy_file: this.config.policyPath,
       });
       if (record.status === "pending_approval") await this.notifier.approvalRequested(record, { code: approvalCode });
     }
+    if (tripped) await this.haltNotice(tripped, resumeCode);
     return result;
   }
 
@@ -350,8 +440,9 @@ export class Governance {
    * The checks every way of moving money shares: the intent must be approved and live, and an auto-approval is
    * re-checked against today's budget, since other spends may have happened since submit. Runs inside a transaction.
    */
-  private assertSpendable(rec: IntentRecord, intents: Record<string, IntentRecord>, now: Date) {
+  private assertSpendable(rec: IntentRecord, intents: Record<string, IntentRecord>, now: Date, halts: Halts) {
     const intentId = rec.intent_id;
+    this.assertNotHalted(rec, halts);
     if (rec.status === "pending_approval") {
       throw new GovernanceError(
         `Intent ${intentId} is waiting for human approval. Poll get_intent_status; do not resubmit or buy another way.`,
@@ -376,6 +467,18 @@ export class Governance {
     }
   }
 
+  /** The kill switch: nothing moves money for a halted agent, whatever was approved before the halt. */
+  private assertNotHalted(rec: IntentRecord, halts: Halts) {
+    const halt = activeHalt(halts, rec.intent.agent_id);
+    if (halt) {
+      throw new GovernanceError(
+        `Spending is halted for ${halt.scope === "all" ? "all agents" : rec.intent.agent_id} (${halt.reason}). ` +
+          "Stop and tell the user; a human has to resume spending. Do not retry or pay another way.",
+        "halted",
+      );
+    }
+  }
+
   /** Whether this intent's rail pays the vendor directly instead of issuing a card. */
   isPayout(rec: IntentRecord): boolean {
     return this.railFor(rec).kind === "payout";
@@ -390,6 +493,9 @@ export class Governance {
         "bank_transfer_rail",
       );
     }
+    if (existing && this.railFor(existing).kind === "x402") {
+      throw new GovernanceError(`${intentId} pays an x402 resource. Call x402_fetch with this intent_id.`, "x402_rail");
+    }
     if (existing && this.railFor(existing).kind === "payout") {
       throw new GovernanceError(
         `Policy routes ${intentId} to the '${existing.rail}' rail, which pays the vendor directly instead of issuing a card. ` +
@@ -398,9 +504,11 @@ export class Governance {
       );
     }
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "issue"; record: IntentRecord };
-    const claim = this.store.transact((intents, now): Claim => {
+    const claim = this.store.transact((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (!rec) throw new GovernanceError(`No intent ${intentId}. Call submit_purchase_intent first.`, "not_found");
+      // Halted agents don't get card details again either: the card itself declines, but don't hand it out.
+      this.assertNotHalted(rec, halts);
 
       if (rec.status === "card_issued" && rec.card) {
         if (rec.card.closed_at || (rec.card.expires_at && new Date(rec.card.expires_at) <= now)) {
@@ -421,7 +529,7 @@ export class Governance {
       if (rec.status === "issuing" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
         throw new GovernanceError(`A card for ${intentId} is being issued right now. Retry in a few seconds.`, "in_progress");
       }
-      this.assertSpendable(rec, intents, now);
+      this.assertSpendable(rec, intents, now, halts);
       rec.status = "issuing";
       rec.updated_at = now.toISOString();
       return { kind: "issue", record: rec };
@@ -493,7 +601,7 @@ export class Governance {
   }
 
   /**
-   * Pay an approved intent through a payout rail (PayPal, Venmo). The money goes to the vendor's account from the
+   * Pay an approved intent through a payout rail (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury). The money goes to the vendor's account from the
    * payee directory in policies.yaml, never to an address the agent supplies. An intent is paid at most once:
    * calling again returns the existing payment, and the rail itself is told the intent ID so a crash mid-call
    * can't double-pay on retry either.
@@ -505,37 +613,43 @@ export class Governance {
     if (adapter.kind !== "payout" || !adapter.sendPayout) {
       throw new GovernanceError(
         `Policy routes ${intentId} to the '${existing.rail}' ${adapter.kind} rail, which doesn't pay vendors directly.` +
-          (adapter.kind === "card" ? " Call request_ephemeral_card instead." : ""),
+          (adapter.kind === "card" ? " Call request_ephemeral_card instead." : "") +
+          (adapter.kind === "x402" ? " Call x402_fetch with this intent_id instead." : ""),
         "not_payout_rail",
       );
     }
 
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; payee: Payee };
-    const claim = this.store.transact((intents, now): Claim => {
+    const claim = this.store.transact((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "paid" && rec.payment) return { kind: "replay", record: rec };
+      this.assertNotHalted(rec, halts);
       if (rec.status === "paying" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
         throw new GovernanceError(`A payment for ${intentId} is being sent right now. Retry in a few seconds.`, "in_progress");
       }
       // A stale "paying" means a crash mid-call. Retrying is safe: the rail dedupes on the intent ID.
-      if (rec.status !== "paying") this.assertSpendable(rec, intents, now);
+      if (rec.status !== "paying") this.assertSpendable(rec, intents, now, halts);
       if (rec.intent.is_recurring) {
         throw new GovernanceError(
           `${intentId} is recurring, and a payout is a one-off payment. Route recurring spend to a card rail in policies.yaml.`,
           "recurring_not_supported",
         );
       }
-      const entry = this.config.policy.payees.find((p) => domainMatches(rec.intent.vendor_domain, p.vendor));
+      // The first payee entry for this vendor that has a destination this rail can pay.
+      const field = adapter.payeeField ?? "receiver";
+      const entry = this.config.policy.payees.find((p) => domainMatches(rec.intent.vendor_domain, p.vendor) && p[field]);
       if (!entry) {
         throw new GovernanceError(
-          `No payee on file for ${normalizeDomain(rec.intent.vendor_domain)}, so PurseString doesn't know where to send the money. ` +
+          `No payee on file for ${normalizeDomain(rec.intent.vendor_domain)} on the '${adapter.name}' rail (it pays to a payee's ` +
+            `${field}), so PurseString doesn't know where to send the money. ` +
             "Ask a human to add the vendor to payees in policies.yaml. Do not pay another way.",
           "no_payee",
         );
       }
       rec.status = "paying";
       rec.updated_at = now.toISOString();
-      return { kind: "pay", record: rec, payee: { receiver: entry.receiver, type: entry.type, wallet: entry.wallet } };
+      const { vendor: _vendor, ...payee } = entry;
+      return { kind: "pay", record: rec, payee };
     });
 
     if (claim.kind === "replay") {
@@ -592,6 +706,7 @@ export class Governance {
         amount: r.intent.amount,
         currency: r.intent.currency,
         payee: claim.payee,
+        paid_to: claim.payee[adapter.payeeField ?? "receiver"],
         sent_at: now.toISOString(),
       };
       return r;
@@ -604,6 +719,7 @@ export class Governance {
       amount: rec.intent.amount,
       currency: rec.intent.currency,
       payee: claim.payee,
+      paid_to: updated.payment!.paid_to,
       approved_by: updated.approved_by,
     });
     return { payment: updated.payment!, record: updated, replayed: false };
@@ -651,7 +767,7 @@ export class Governance {
     }
 
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "run"; record: IntentRecord };
-    const claim = this.store.transact((intents, now): Claim => {
+    const claim = this.store.transact((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "executed") return { kind: "replay", record: rec };
       if (rec.status === "executing") {
@@ -663,7 +779,7 @@ export class Governance {
           "outcome_unknown",
         );
       }
-      this.assertSpendable(rec, intents, now);
+      this.assertSpendable(rec, intents, now, halts);
       rec.status = "executing";
       rec.updated_at = now.toISOString();
       return { kind: "run", record: rec };
@@ -713,6 +829,349 @@ export class Governance {
       approved_by: record.approved_by,
     });
     return { record, result, replayed: false };
+  }
+
+  private wallet?: X402Wallet;
+  private x402Wallet(): X402Wallet {
+    if (!this.config.env.x402PrivateKey) {
+      throw new GovernanceError("x402 payments need a wallet: set X402_PRIVATE_KEY.", "x402_not_configured");
+    }
+    return (this.wallet ??= new X402Wallet(this.config.env.x402PrivateKey));
+  }
+
+  private async readResponse(res: Response): Promise<X402Response> {
+    const buf = Buffer.from(await res.arrayBuffer());
+    const max = this.config.policy.x402.max_response_bytes;
+    return {
+      status: res.status,
+      content_type: res.headers.get("content-type") ?? undefined,
+      body: buf.subarray(0, max).toString("utf8"),
+      truncated: buf.length > max,
+    };
+  }
+
+  /**
+   * Fetch a URL that may charge over x402. A free answer is returned as is. A 402 becomes a purchase intent for the
+   * exact price, ruled on like any other: auto-approved ones are paid at once, others wait for a human (repeat the
+   * call with the intent_id once approved), and denials pay nothing. Each intent signs at most one authorization and
+   * a retry re-sends that same one, whose nonce can settle on chain only once, so a retried call can't pay twice.
+   */
+  async x402Fetch(input: X402FetchInput): Promise<X402FetchResult> {
+    const cfg = this.config.policy.x402;
+    if (!cfg.enabled) throw new GovernanceError("x402 payments are off. Set x402.enabled: true in policies.yaml.", "x402_disabled");
+    let url: URL;
+    try {
+      url = new URL(input.url);
+    } catch {
+      throw new GovernanceError(`${input.url} isn't a URL.`, "bad_url");
+    }
+    if (url.protocol !== "https:") throw new GovernanceError("x402 resources must be https.", "bad_url");
+    const method = input.method ?? "GET";
+    const request = (headers: Record<string, string> = {}) =>
+      fetch(url, {
+        method,
+        redirect: "manual",
+        headers: { ...(input.content_type ? { "Content-Type": input.content_type } : {}), ...headers },
+        body: method === "POST" ? input.body : undefined,
+      });
+
+    let rec: IntentRecord | undefined;
+    if (input.intent_id) {
+      rec = this.store.get(input.intent_id);
+      if (!rec?.x402) throw new GovernanceError(`No x402 intent ${input.intent_id}.`, "not_found");
+      if (rec.x402.url !== url.href) {
+        throw new GovernanceError(`Intent ${input.intent_id} is for ${rec.x402.url}, not ${url.href}.`, "url_mismatch");
+      }
+      if (rec.status === "paid") return this.x402Replay(rec);
+    }
+
+    // A previously signed authorization is re-sent as is: no need to ask the server for the price again.
+    if (rec?.x402?.authorization) return this.x402Pay(rec.intent_id, request, undefined);
+
+    const first = await request();
+    if (first.status !== 402) {
+      if (rec) throw new GovernanceError(`${url.href} no longer asks for payment (HTTP ${first.status}). Nothing was paid.`, "not_402");
+      return { paid: false, replayed: false, response: await this.readResponse(first) };
+    }
+    const bodyText = await first.text();
+    const challenge = parseChallenge(first.headers, bodyText);
+    if (!challenge || challenge.accepts.length === 0) {
+      throw new GovernanceError(`${url.href} answered 402 but not with an x402 payment request PurseString can read.`, "not_x402");
+    }
+    const vendor = normalizeDomain(url.hostname);
+    const pins = cfg.pay_to.filter((p) => domainMatches(vendor, p.vendor));
+    const reasons: string[] = [];
+    const usable = challenge.accepts.filter((r) => {
+      const why = unsupportedReason(r, cfg.networks) ??
+        (pins.length && !pins.some((p) => p.address.toLowerCase() === r.pay_to.toLowerCase())
+          ? `payTo ${r.pay_to} isn't the address pinned for ${vendor} in x402.pay_to`
+          : null);
+      if (why) reasons.push(why);
+      return !why;
+    });
+
+    let requirement: X402Requirement | undefined;
+    if (rec) {
+      // Repeating a paused call: pay only exactly what was approved.
+      const x = rec.x402!;
+      requirement = usable.find(
+        (r) => r.network === x.network && r.asset.toLowerCase() === x.asset.toLowerCase() && r.pay_to.toLowerCase() === x.pay_to.toLowerCase() && r.amount === x.amount_atomic,
+      );
+      if (!requirement) {
+        throw new GovernanceError(
+          `${url.href} now asks for something other than what ${rec.intent_id} approved. Nothing was paid; call x402_fetch without intent_id to get a new decision.`,
+          "price_changed",
+        );
+      }
+    } else {
+      // Cheapest usable option.
+      requirement = usable.sort((a, b) => (BigInt(a.amount) < BigInt(b.amount) ? -1 : 1))[0];
+      if (!requirement) {
+        this.store.audit("x402_unpayable", { url: url.href, agent_id: input.agent_id, reasons });
+        throw new GovernanceError(`PurseString can't pay ${url.href}: ${reasons.join("; ")}.`, "x402_unsupported");
+      }
+      const cents = atomicToCents(requirement.amount);
+      const intent: PurchaseIntent = {
+        agent_id: input.agent_id,
+        task_id: input.task_id,
+        task_goal: input.task_goal,
+        vendor_domain: vendor,
+        amount: toMajor(cents, "USD"),
+        currency: "USD",
+        is_recurring: false,
+        alternatives_attempted: input.alternatives_attempted ?? [],
+        reasoning: input.reasoning ?? [],
+      };
+      const x402: X402Record = {
+        url: url.href,
+        method,
+        network: requirement.network,
+        asset: requirement.asset,
+        pay_to: requirement.pay_to,
+        amount_atomic: requirement.amount,
+      };
+      rec = (await this.submitIntent(intent, undefined, { rail: "x402", x402 })).record;
+      if (rec.status === "paid") return this.x402Replay(rec);
+      if (!rec.x402 || rec.x402.pay_to.toLowerCase() !== requirement.pay_to.toLowerCase() || rec.x402.amount_atomic !== requirement.amount) {
+        throw new GovernanceError(
+          `${rec.intent_id} already exists for this task with different payment terms. Use a new task_id.`,
+          "intent_conflict",
+        );
+      }
+    }
+    if (rec.status !== "approved") return { paid: false, replayed: false, record: rec };
+    return this.x402Pay(rec.intent_id, request, { requirement, resource: challenge.resource });
+  }
+
+  private x402Replay(rec: IntentRecord): X402FetchResult {
+    this.store.audit("payment_replayed", {
+      intent_id: rec.intent_id,
+      payment_id: rec.payment?.payment_id,
+      note: "x402 resource already paid: returned the stored response, nothing paid again.",
+    });
+    return { paid: true, replayed: true, record: rec, response: rec.x402?.response, transaction: rec.x402?.transaction };
+  }
+
+  private async x402Pay(
+    intentId: string,
+    request: (headers: Record<string, string>) => Promise<Response>,
+    fresh: { requirement: X402Requirement; resource: unknown } | undefined,
+  ): Promise<X402FetchResult> {
+    type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; header: { name: string; value: string } };
+    const claim = this.store.transact((intents, now, halts): Claim => {
+      const rec = intents[intentId];
+      if (rec.status === "paid") return { kind: "replay", record: rec };
+      this.assertNotHalted(rec, halts);
+      if (rec.status === "paying" && now.getTime() - new Date(rec.updated_at).getTime() < ISSUING_STALE_MS) {
+        throw new GovernanceError(`A payment for ${intentId} is being sent right now. Retry in a few seconds.`, "in_progress");
+      }
+      if (rec.status !== "paying") this.assertSpendable(rec, intents, now, halts);
+      const x = rec.x402!;
+      let header: { name: string; value: string };
+      if (x.authorization) {
+        if (new Date(Number(x.authorization.valid_before) * 1000) <= now) {
+          throw new GovernanceError(
+            `The payment authorization for ${intentId} expired at ${new Date(Number(x.authorization.valid_before) * 1000).toISOString()}. ` +
+              `If it never settled (check nonce ${x.authorization.nonce} on ${x.network}), submit a new intent with a new task_id.`,
+            "authorization_expired",
+          );
+        }
+        header = x.authorization.header;
+      } else {
+        if (!fresh) throw new GovernanceError(`No payment terms for ${intentId}.`, "not_found");
+        const cap = this.config.policy.x402.max_timeout_seconds;
+        const r = { ...fresh.requirement, max_timeout_seconds: Math.min(fresh.requirement.max_timeout_seconds, cap) };
+        const signed = this.x402Wallet().authorize(r, now);
+        header = paymentHeader(r, fresh.resource, signed);
+        x.authorization = {
+          signature: signed.signature,
+          nonce: signed.authorization.nonce,
+          valid_before: signed.authorization.validBefore,
+          from: signed.authorization.from,
+          header,
+        };
+      }
+      rec.status = "paying";
+      rec.updated_at = now.toISOString();
+      return { kind: "pay", record: rec, header };
+    });
+    if (claim.kind === "replay") return this.x402Replay(claim.record);
+
+    const revert = () =>
+      this.store.transact((intents, now) => {
+        intents[intentId].status = "approved";
+        intents[intentId].updated_at = now.toISOString();
+        return intents[intentId];
+      });
+    let res: Response;
+    try {
+      res = await request({ [claim.header.name]: claim.header.value });
+    } catch (err) {
+      revert();
+      this.store.audit("payment_failed", { intent_id: intentId, adapter: "x402", error: String(err) });
+      throw new GovernanceError(`x402 request failed: ${(err as Error).message}. Retrying re-sends the same authorization.`, "adapter_error");
+    }
+    const settlement = parseSettlement(res.headers);
+    const response = await this.readResponse(res);
+    if (!res.ok || settlement?.success === false) {
+      revert();
+      this.store.audit("payment_failed", {
+        intent_id: intentId,
+        adapter: "x402",
+        http_status: res.status,
+        reason: settlement?.errorReason,
+      });
+      throw new GovernanceError(
+        `The server didn't accept the payment for ${intentId} (HTTP ${res.status}${settlement?.errorReason ? `, ${settlement.errorReason}` : ""}). ` +
+          "Retrying re-sends the same authorization, so it can't pay twice.",
+        "payment_refused",
+      );
+    }
+    const record = this.store.transact((intents, now) => {
+      const r = intents[intentId];
+      const x = r.x402!;
+      r.status = "paid";
+      r.updated_at = now.toISOString();
+      x.paid_at = now.toISOString();
+      if (settlement?.transaction) x.transaction = settlement.transaction;
+      x.response = response;
+      r.payment = {
+        adapter: "x402",
+        payment_id: settlement?.transaction || x.authorization!.nonce,
+        status: settlement?.transaction ? "settled" : "accepted",
+        amount: r.intent.amount,
+        currency: "USD",
+        payee: {},
+        paid_to: x.pay_to,
+        sent_at: now.toISOString(),
+      };
+      return r;
+    });
+    this.store.audit("payment_sent", {
+      intent_id: intentId,
+      adapter: "x402",
+      payment_id: record.payment!.payment_id,
+      network: record.x402!.network,
+      asset: record.x402!.asset,
+      paid_to: record.x402!.pay_to,
+      amount_atomic: record.x402!.amount_atomic,
+      amount: record.intent.amount,
+      currency: "USD",
+      from: record.x402!.authorization!.from,
+      approved_by: record.approved_by,
+    });
+    return { paid: true, replayed: false, record, response, transaction: record.x402!.transaction };
+  }
+
+  /** The kill switch's current state: every halt still in force. */
+  activeHalts(): HaltRecord[] {
+    return this.store.transact((_i, _n, halts) =>
+      Object.values(halts)
+        .filter((h) => !h.resumed_at)
+        .map(({ resume_code: _code, ...h }) => h),
+    );
+  }
+
+  /**
+   * Pull the kill switch for one agent, or for every agent when agent_id is left out. Safe to call from anywhere,
+   * agents included: halting can only stop money. Halting what's already halted keeps the first halt.
+   */
+  async halt(opts: { agent_id?: string; reason: string; by: string; via: ApprovalChannel }): Promise<HaltRecord> {
+    let code: string | undefined;
+    const out = this.store.transact((_intents, now, halts) => {
+      const key = haltKey(opts.agent_id);
+      const current = halts[key];
+      if (current && !current.resumed_at) return { halt: current, fresh: false };
+      const halt: HaltRecord = {
+        scope: opts.agent_id ? "agent" : "all",
+        ...(opts.agent_id ? { agent_id: opts.agent_id.trim() } : {}),
+        reason: opts.reason,
+        by: opts.by,
+        via: opts.via,
+        tripped_at: now.toISOString(),
+      };
+      if (this.requireCode && this.canSendCode) {
+        code = newApprovalCode();
+        halt.resume_code = hashApprovalCode(code);
+      }
+      halts[key] = halt;
+      return { halt, fresh: true };
+    });
+    if (out.fresh) await this.haltNotice(out.halt, code);
+    const { resume_code: _c, ...shown } = out.halt;
+    return shown;
+  }
+
+  /**
+   * Lift a halt. Like approving, a terminal resume needs the one-time code sent to Slack or Discord when codes are
+   * required, so an agent with a shell can't switch itself back on. Lifting an agent's halt leaves a global one alone.
+   */
+  resume(opts: { agent_id?: string; by: string; via: ApprovalChannel; code?: string }): HaltRecord {
+    const key = haltKey(opts.agent_id);
+    const out = this.store.transact((_intents, now, halts): { halt: HaltRecord; error?: GovernanceError } => {
+      const h = halts[key];
+      const who = opts.agent_id ? `agent ${opts.agent_id}` : "all agents";
+      if (!h || h.resumed_at) throw new GovernanceError(`Spending isn't halted for ${who}.`, "not_halted");
+      if (opts.via === "cli" && this.requireCode) {
+        if (!h.resume_code) {
+          throw new GovernanceError(`This halt has no resume code, so resume it over the HTTP admin API (POST /resume).`, "code_unavailable");
+        }
+        if (!opts.code) {
+          throw new GovernanceError(
+            `Resuming from the terminal needs the one-time code from the Slack or Discord message: pursestring resume${opts.agent_id ? ` --agent ${opts.agent_id}` : ""} --code XXXXX-XXXXX`,
+            "code_required",
+          );
+        }
+        if (!verifyApprovalCode(opts.code, h.resume_code)) {
+          // Too many wrong codes leaves the halt in place (it already stops everything) and drops the code,
+          // so from then on only the HTTP admin API can resume.
+          h.resume_code_attempts = (h.resume_code_attempts ?? 0) + 1;
+          if (h.resume_code_attempts >= MAX_CODE_ATTEMPTS) h.resume_code = undefined;
+          return { halt: h, error: new GovernanceError(`Wrong resume code for ${who}.`, "bad_code") };
+        }
+      }
+      h.resumed_at = now.toISOString();
+      h.resumed_by = opts.by;
+      h.resumed_via = opts.via;
+      h.resume_code = undefined;
+      return { halt: h };
+    });
+    if (out.error) {
+      this.store.audit("resume_code_rejected", { key, by: opts.by, via: opts.via, attempts: out.halt.resume_code_attempts });
+      throw out.error;
+    }
+    this.store.audit("kill_switch_resumed", { scope: out.halt.scope, agent_id: out.halt.agent_id, by: opts.by, via: opts.via });
+    return out.halt;
+  }
+
+  private async haltNotice(halt: HaltRecord, code?: string) {
+    const { resume_code: _c, ...entry } = halt;
+    this.store.audit("kill_switch_tripped", entry);
+    try {
+      await this.notifier.killSwitchTripped?.(halt, { code });
+    } catch (err) {
+      this.store.audit("kill_switch_notify_failed", { agent_id: halt.agent_id, error: String(err) });
+    }
   }
 
   async getStatus(intentId: string, waitSeconds = 0): Promise<IntentRecord> {
@@ -820,7 +1279,7 @@ export class Governance {
   authorize(req: AuthorizationRequest): AuthorizationDecision {
     const t0 = performance.now();
     const jit = this.config.policy.jit;
-    const result = this.store.transact((intents, now) => {
+    const result = this.store.transact((intents, now, halts) => {
       const rec = Object.values(intents).find((r) => r.card?.token === req.card_token);
       const decide = (code: AuthorizationCode, reason: string) => {
         if (rec) {
@@ -842,6 +1301,8 @@ export class Governance {
 
       if (!rec?.card) return decide("unknown_card", "No PurseString intent owns this card.");
       const card = rec.card;
+      const halt = activeHalt(halts, rec.intent.agent_id);
+      if (halt) return decide("halted", `Spending is halted: ${halt.reason}`);
       if (rec.status !== "card_issued") return decide("intent_not_active", `Intent is ${rec.status}.`);
       if (card.closed_at || (card.expires_at && new Date(card.expires_at) <= now)) {
         return decide("card_expired", `Single-use card expired at ${card.expires_at}.`);

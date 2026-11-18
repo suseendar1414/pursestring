@@ -145,6 +145,11 @@ export function evaluate(
   return decide(rules);
 }
 
+/** Add a rule to an evaluation and decide again, e.g. the kill switch on top of the spend policy. */
+export function withRule(evaluation: PolicyEvaluation, rule: RuleResult): PolicyEvaluation {
+  return decide([rule, ...evaluation.rules]);
+}
+
 function decide(rules: RuleResult[]): PolicyEvaluation {
   const failed = rules.filter((r) => !r.passed);
   const decision: Decision = failed.some((r) => r.effect === "deny")

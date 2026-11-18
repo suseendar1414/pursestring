@@ -75,7 +75,14 @@ adapter:
   paypal:
     environment: sandbox          # sandbox | production
 
-payees: []                        # where the paypal rail sends money, per vendor (see below)
+payees: []                        # where payout rails send money, per vendor (see below)
+
+kill_switch:
+  loop_detection:
+    enabled: true                 # halt an agent that keeps re-buying the same thing (see below)
+    window_minutes: 10
+    max_similar: 5
+    amount_tolerance_percent: 10
 
 routes: []                        # see "Rail routing" below
 
@@ -116,7 +123,66 @@ payees:
     wallet: PAYPAL                # PAYPAL | VENMO
 ```
 
+Three more payout rails work the same way: the agent calls `send_payment`, the money goes only to the destination on file under `payees`, and each intent is paid at most once (the intent ID is the provider's idempotency key). Each rail reads its own field on a payee entry, so one vendor can have entries for several rails; the first entry for the vendor that has the rail's field is used. None of them has been run against a live account yet: they're built from each provider's API reference and tested against stubbed responses.
+
+| Rail | Pays | Payee field | Credentials |
+|---|---|---|---|
+| `stripe_connect` | A [Stripe Connect transfer](https://docs.stripe.com/api/transfers/create) from your platform balance to the vendor's connected account. Stripe pays that account out to its bank on its own schedule. | `stripe_account: acct_...` | `STRIPE_SECRET_KEY`. Only test-mode keys (`sk_test_`, `rk_test_`) unless `adapter.stripe_connect.environment: production`. |
+| `razorpayx` | A [RazorpayX payout](https://razorpay.com/docs/api/x/payouts/) in INR from your RazorpayX account to the vendor's bank account or UPI ID. Low-balance payouts fail instead of queueing. | `razorpayx_fund_account: fa_...` | `RAZORPAYX_KEY_ID`, `RAZORPAYX_KEY_SECRET`, `RAZORPAYX_ACCOUNT_NUMBER` (or `adapter.razorpayx.account_number`). Only `rzp_test_` keys unless `adapter.razorpayx.environment: production`. `adapter.razorpayx.mode` is `IMPS` by default (`NEFT`, `RTGS`, `UPI`). |
+| `modern_treasury` | A [Modern Treasury payment order](https://docs.moderntreasury.com/payments/reference/create-payment-order) (ACH credit by default) from your internal account to the vendor's external account. | `modern_treasury_account: <external account ID>` | `MODERN_TREASURY_ORGANIZATION_ID`, `MODERN_TREASURY_API_KEY`, `MODERN_TREASURY_ORIGINATING_ACCOUNT_ID` (or `adapter.modern_treasury.originating_account_id`). `adapter.modern_treasury.payment_type` is `ach` by default. Whether real money moves depends on the organization: use a sandbox organization to test. |
+
+```yaml
+routes:
+  - rail: stripe_connect
+    vendors: ["pdfocr.io"]
+  - rail: razorpayx
+    vendors: ["*.in"]
+payees:
+  - vendor: pdfocr.io
+    stripe_account: acct_1Nv0FGQ9RKHgCVdK
+  - vendor: gstfiling.in
+    razorpayx_fund_account: fa_00000000000001
+  - vendor: acme-supplies.com
+    modern_treasury_account: 0f8e3719-3dfd-4613-9bbf-c0333781b59f
+```
+
 `highnote`, `marqeta`, `amex`, `network_token` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
+
+## x402
+
+`x402_fetch` pays for HTTP resources that answer `402 Payment Required`, in USDC. Each payment becomes a purchase intent for the URL's host and goes through every rule on this page. Off by default; see [x402.md](x402.md).
+
+## Kill switch and loop detection
+
+A halt stops an agent's spending at once, whatever was approved before it:
+
+- new intents are denied (rule `kill_switch`),
+- approved intents can't get a card or be paid (`halted` error), and a card already issued isn't handed out again,
+- real-time card authorizations decline (`halted`, sent to Lithic as `CARD_PAUSED`).
+
+Pull it by hand for one agent or for all of them:
+
+```bash
+pursestring halt --agent invoice-bot --reason "acting strangely"   # one agent
+pursestring halt --reason "incident"                               # every agent
+pursestring halts                                                  # what's in force
+pursestring resume --agent invoice-bot --code XXXXX-XXXXX
+```
+
+Over HTTP, with `PURSESTRING_ADMIN_TOKEN`: `POST /halt` and `POST /resume` (JSON body `{"agent_id": "...", "reason": "..."}`, leave `agent_id` out for all agents) and `GET /halts`. Halting is always allowed. Resuming from the terminal needs the one-time code sent to Slack or Discord when approval codes are on, the same rule as `pursestring approve`, so an agent with a shell can't switch itself back on. Resuming one agent leaves a global halt in place.
+
+Loop detection halts an agent on its own when it keeps asking for the same purchase under fresh task IDs, which is what an agent stuck in a retry loop looks like. Retries with the same task ID are already deduplicated and don't count.
+
+```yaml
+kill_switch:
+  loop_detection:
+    enabled: true
+    window_minutes: 10            # how far back to look
+    max_similar: 5                # the 5th near-identical intent in the window halts the agent
+    amount_tolerance_percent: 10  # 15.00 and 16.50 count as the same purchase
+```
+
+"Near-identical" means the same agent, the same vendor domain, the same currency and amounts within the tolerance, compared in whole minor units. The intent that trips it is denied, the halt is written to the audit log with the IDs of the intents that looked like a loop, and Slack or Discord gets the resume command. Intents from before the last resume don't count, so resuming doesn't trip it again straight away.
 
 ## Vendor matching
 

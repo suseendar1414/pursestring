@@ -26,6 +26,9 @@ const fail = (err: unknown) => ({
 function nextStep(rec: IntentRecord, payout: boolean): string {
   switch (rec.status) {
     case "approved":
+      if (rec.x402) {
+        return `Approved. Call x402_fetch again with url "${rec.x402.url}" and intent_id "${rec.intent_id}" to pay and get the resource.`;
+      }
       if (rec.action) {
         return `Approved. Call ${rec.action.tool} again with exactly the same arguments and intent_id "${rec.intent_id}" to run it.`;
       }
@@ -35,6 +38,9 @@ function nextStep(rec: IntentRecord, payout: boolean): string {
     case "pending_approval":
       return `Paused for human approval. Do not buy another way. Call get_intent_status with intent_id "${rec.intent_id}" and wait_seconds to wait for a decision.`;
     case "denied":
+      if (rec.evaluation.rules.some((r) => !r.passed && r.rule.startsWith("kill_switch"))) {
+        return "Spending is halted for this agent. Stop buying, tell the user why, and wait for a human to resume it. Do not retry or pay another way.";
+      }
       return "Denied. Do not attempt this purchase; tell the user why and look for a free alternative.";
     case "card_issued":
       return `A card was already issued for this intent. Call request_ephemeral_card with "${rec.intent_id}" to get the same card again. Do not create a new purchase.`;
@@ -73,7 +79,7 @@ function view(gov: Governance, rec: IntentRecord) {
     expires_at: rec.expires_at,
     card_last_four: rec.card?.last_four,
     payment: rec.payment
-      ? { payment_id: rec.payment.payment_id, status: rec.payment.status, paid_to: rec.payment.payee.receiver }
+      ? { payment_id: rec.payment.payment_id, status: rec.payment.status, paid_to: rec.payment.paid_to ?? rec.payment.payee.receiver }
       : undefined,
     ...(rec.refund_status
       ? {
@@ -306,7 +312,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     {
       title: "Send payment",
       description:
-        "Pay an approved intent through a payout rail (PayPal or Venmo). The approved amount goes to the vendor's " +
+        "Pay an approved intent through a payout rail (PayPal, Venmo, Stripe Connect, RazorpayX or Modern Treasury). The approved amount goes to the vendor's " +
         "account on file in the policy; you can't choose the recipient. Each intent is paid at most once: calling " +
         "again returns the existing payment, so it is safe to retry.",
       inputSchema: { intent_id: z.string().describe("The intent_id returned by submit_purchase_intent.") },
@@ -326,8 +332,8 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
             status: payment.status,
             amount: payment.amount,
             currency: payment.currency,
-            paid_to: payment.payee.receiver,
-            wallet: payment.payee.wallet,
+            paid_to: payment.paid_to ?? payment.payee.receiver,
+            ...(payment.adapter === "paypal" ? { wallet: payment.payee.wallet } : {}),
             rail: payment.adapter,
             sent_at: payment.sent_at,
           },
@@ -360,12 +366,66 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     },
   );
 
+  if (gov.config.policy.x402.enabled) {
+    server.registerTool(
+      "x402_fetch",
+      {
+        title: "Fetch a paid (x402) resource",
+        description:
+          "Fetch an https URL that may charge per request with HTTP 402 (x402). A free answer comes straight back. If the " +
+          "server asks for payment, PurseString turns the exact price into a purchase intent and rules on it like any other: " +
+          "small allowlisted payments are paid in USDC at once and you get the resource; others pause for a human (wait with " +
+          "get_intent_status, then call again with the same url and the intent_id) or are refused. Repeating a paid call " +
+          "returns the stored response and never pays twice.",
+        inputSchema: {
+          agent_id: PurchaseIntentShape.agent_id,
+          task_id: PurchaseIntentShape.task_id,
+          task_goal: PurchaseIntentShape.task_goal,
+          url: z.string().url().describe("The https resource to fetch."),
+          method: z.enum(["GET", "POST"]).default("GET"),
+          body: z.string().optional().describe("Request body for POST."),
+          content_type: z.string().optional().describe("Content-Type of the body, e.g. application/json."),
+          alternatives_attempted: PurchaseIntentShape.alternatives_attempted,
+          reasoning: PurchaseIntentShape.reasoning,
+          intent_id: z.string().optional().describe("Only when repeating a call that was paused for approval."),
+        },
+        annotations: { idempotentHint: true, openWorldHint: true },
+      },
+      async (args) => {
+        try {
+          const out = await gov.x402Fetch(args);
+          return ok({
+            paid: out.paid,
+            replayed: out.replayed,
+            ...(out.record ? view(gov, out.record) : {}),
+            ...(out.record?.x402
+              ? {
+                  price: { amount_atomic: out.record.x402.amount_atomic, network: out.record.x402.network, pay_to: out.record.x402.pay_to },
+                  transaction: out.transaction,
+                }
+              : {}),
+            response: out.response,
+            note: out.replayed
+              ? "Already paid: this is the stored response. Nothing was paid again."
+              : out.paid
+                ? "Paid once through PurseString policy."
+                : out.record
+                  ? "Not paid."
+                  : "The resource was free: nothing was paid.",
+          });
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    );
+  }
+
   if (upstream) {
     registerPayPalTools(
       server,
       gov,
       upstream,
-      new Set(["check_policy_compliance", "submit_purchase_intent", "request_ephemeral_card", "send_payment", "get_intent_status"]),
+      new Set(["check_policy_compliance", "submit_purchase_intent", "request_ephemeral_card", "send_payment", "get_intent_status", "x402_fetch"]),
     );
   }
 

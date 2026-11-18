@@ -4,7 +4,16 @@ import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 
-export const RAILS = ["mock", "lithic", "privacy", "airwallex", "paypal", "highnote", "marqeta", "amex", "network_token", "ach"] as const;
+export const RAILS = [
+  "mock",
+  "lithic",
+  "privacy",
+  "airwallex",
+  "paypal",
+  "stripe_connect",
+  "razorpayx",
+  "modern_treasury",
+  "highnote", "marqeta", "amex", "network_token", "ach"] as const;
 const RailName = z.enum(RAILS);
 export type RailName = z.infer<typeof RailName>;
 
@@ -20,15 +29,25 @@ const RouteSchema = z.object({
 });
 export type Route = z.infer<typeof RouteSchema>;
 
-const PayeeSchema = z.object({
-  /** Vendor pattern, same syntax as the allowlist. */
-  vendor: z.string().min(1),
-  /** The vendor's PayPal email, phone number or PayPal account ID. */
-  receiver: z.string().min(1),
-  type: z.enum(["EMAIL", "PHONE", "PAYPAL_ID"]).default("EMAIL"),
-  /** Pay into the vendor's PayPal or Venmo account. */
-  wallet: z.enum(["PAYPAL", "VENMO"]).default("PAYPAL"),
-});
+const PayeeSchema = z
+  .object({
+    /** Vendor pattern, same syntax as the allowlist. */
+    vendor: z.string().min(1),
+    /** paypal rail: the vendor's PayPal email, phone number or PayPal account ID. */
+    receiver: z.string().min(1).optional(),
+    type: z.enum(["EMAIL", "PHONE", "PAYPAL_ID"]).default("EMAIL"),
+    /** paypal rail: pay into the vendor's PayPal or Venmo account. */
+    wallet: z.enum(["PAYPAL", "VENMO"]).default("PAYPAL"),
+    /** stripe_connect rail: the vendor's connected account ID. */
+    stripe_account: z.string().regex(/^acct_\w+$/, "must look like acct_...").optional(),
+    /** razorpayx rail: the vendor's fund account ID. */
+    razorpayx_fund_account: z.string().regex(/^fa_\w+$/, "must look like fa_...").optional(),
+    /** modern_treasury rail: the vendor's external account ID (the receiving account). */
+    modern_treasury_account: z.string().min(1).optional(),
+  })
+  .refine((p) => p.receiver || p.stripe_account || p.razorpayx_fund_account || p.modern_treasury_account, {
+    message: "a payee needs at least one of receiver, stripe_account, razorpayx_fund_account or modern_treasury_account",
+  });
 export type PayeeEntry = z.infer<typeof PayeeSchema>;
 
 const PolicySchema = z.object({
@@ -117,15 +136,42 @@ const PolicySchema = z.object({
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
         })
         .default({ environment: "sandbox" }),
+      stripe_connect: z
+        .object({
+          /** "sandbox" accepts only Stripe test-mode keys. */
+          environment: z.enum(["sandbox", "production"]).default("sandbox"),
+        })
+        .default({ environment: "sandbox" }),
+      razorpayx: z
+        .object({
+          /** "sandbox" accepts only RazorpayX test-mode keys. */
+          environment: z.enum(["sandbox", "production"]).default("sandbox"),
+          /** Your RazorpayX account number; or RAZORPAYX_ACCOUNT_NUMBER. */
+          account_number: z.string().optional(),
+          mode: z.enum(["IMPS", "NEFT", "RTGS", "UPI"]).default("IMPS"),
+          purpose: z.string().min(1).default("vendor bill"),
+        })
+        .default({ environment: "sandbox", mode: "IMPS", purpose: "vendor bill" }),
+      modern_treasury: z
+        .object({
+          /** The internal account money leaves from; or MODERN_TREASURY_ORIGINATING_ACCOUNT_ID. */
+          originating_account_id: z.string().optional(),
+          /** Payment order type: ach, wire, rtp, sepa, ... */
+          payment_type: z.string().min(1).default("ach"),
+        })
+        .default({ payment_type: "ach" }),
     })
     .default({
       type: "mock",
       lithic: { environment: "sandbox" },
       airwallex: { environment: "sandbox" },
       paypal: { environment: "sandbox" },
+      stripe_connect: { environment: "sandbox" },
+      razorpayx: { environment: "sandbox", mode: "IMPS", purpose: "vendor bill" },
+      modern_treasury: { payment_type: "ach" },
     }),
   /**
-   * Where payout rails (PayPal, Venmo) send money for each vendor. The agent never supplies a payee:
+   * Where payout rails (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury) send money for each vendor. The agent never supplies a payee:
    * a vendor with no entry here can't be paid by payout.
    */
   payees: z.array(PayeeSchema).default([]),
@@ -160,6 +206,45 @@ const PolicySchema = z.object({
       require_approval: ["accept_dispute_claim", "cancel_subscription", "cancel_sent_invoice", "update_subscription"],
       deny: [],
     }),
+  /**
+   * Stop agents spending. A human can halt one agent or all of them (pursestring halt, POST /halt); loop detection
+   * halts an agent on its own when it keeps asking for the same purchase under new task IDs. While halted, new
+   * intents are denied, approved intents can't be paid or get a card, and real-time card authorizations decline.
+   */
+  kill_switch: z
+    .object({
+      loop_detection: z
+        .object({
+          enabled: z.boolean().default(true),
+          /** How far back to look for repeats. */
+          window_minutes: z.number().positive().default(10),
+          /** The intent that makes this many near-identical ones inside the window halts the agent. */
+          max_similar: z.number().int().min(2).default(5),
+          /** Amounts this close count as the same purchase: 10 means 15.00 and 16.50 match. */
+          amount_tolerance_percent: z.number().nonnegative().max(100).default(10),
+        })
+        .default({ enabled: true, window_minutes: 10, max_similar: 5, amount_tolerance_percent: 10 }),
+    })
+    .default({ loop_detection: { enabled: true, window_minutes: 10, max_similar: 5, amount_tolerance_percent: 10 } }),
+  /**
+   * Pay for HTTP resources that answer 402 Payment Required (x402), in USDC from the wallet in X402_PRIVATE_KEY.
+   * Every payment is a purchase intent like any other: same budgets, allowlist, approvals, kill switch and audit log.
+   */
+  x402: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** CAIP-2 networks PurseString may pay on. Base Sepolia (testnet) by default; add eip155:8453 for Base (real USDC). */
+      networks: z.array(z.string().regex(/^eip155:\d+$/)).default(["eip155:84532"]),
+      /** Optional: pin the address each vendor may be paid at. A vendor listed here can't be paid anywhere else. */
+      pay_to: z
+        .array(z.object({ vendor: z.string().min(1), address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }))
+        .default([]),
+      /** Longest authorization PurseString will sign, whatever the server asks for. */
+      max_timeout_seconds: z.number().int().positive().default(300),
+      /** Response bodies longer than this are cut before they're returned to the agent. */
+      max_response_bytes: z.number().int().positive().default(100_000),
+    })
+    .default({ enabled: false, networks: ["eip155:84532"], pay_to: [], max_timeout_seconds: 300, max_response_bytes: 100_000 }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z
@@ -194,6 +279,15 @@ export interface Config {
     airwallexCardholderId?: string;
     paypalClientId?: string;
     paypalClientSecret?: string;
+    stripeSecretKey?: string;
+    razorpayxKeyId?: string;
+    razorpayxKeySecret?: string;
+    razorpayxAccountNumber?: string;
+    modernTreasuryOrgId?: string;
+    modernTreasuryApiKey?: string;
+    modernTreasuryOriginatingAccountId?: string;
+    /** Private key of the wallet that signs x402 payments. Never logged or stored. */
+    x402PrivateKey?: string;
     /** Lithic ASA HMAC secret (whsec_...), used to verify real-time authorization requests. */
     lithicWebhookSecret?: string;
     slackWebhookUrl?: string;
@@ -249,6 +343,15 @@ export function loadConfig(): Config {
     airwallexCardholderId: process.env.AIRWALLEX_CARDHOLDER_ID || policy.adapter.airwallex.cardholder_id,
     paypalClientId: process.env.PAYPAL_CLIENT_ID || undefined,
     paypalClientSecret: process.env.PAYPAL_CLIENT_SECRET || undefined,
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY || undefined,
+    razorpayxKeyId: process.env.RAZORPAYX_KEY_ID || undefined,
+    razorpayxKeySecret: process.env.RAZORPAYX_KEY_SECRET || undefined,
+    razorpayxAccountNumber: process.env.RAZORPAYX_ACCOUNT_NUMBER || policy.adapter.razorpayx.account_number,
+    modernTreasuryOrgId: process.env.MODERN_TREASURY_ORGANIZATION_ID || undefined,
+    modernTreasuryApiKey: process.env.MODERN_TREASURY_API_KEY || undefined,
+    x402PrivateKey: process.env.X402_PRIVATE_KEY || undefined,
+    modernTreasuryOriginatingAccountId:
+      process.env.MODERN_TREASURY_ORIGINATING_ACCOUNT_ID || policy.adapter.modern_treasury.originating_account_id,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || policy.notifications.slack_webhook_url,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET || undefined,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || policy.notifications.discord_webhook_url,

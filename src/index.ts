@@ -29,6 +29,12 @@ Usage:
                                 --code is the one-time code from the Slack or Discord message,
                                 required when approvals.require_code is on
   pursestring deny <intent_id> [--by name] [--note text]
+  pursestring halt [--agent id] [--reason text] [--by name]
+                                Kill switch: stop one agent's spending, or every agent's without --agent
+  pursestring resume [--agent id] [--code XXXXX-XXXXX] [--by name]
+                                Lift a halt; --code is the one-time code from the Slack or Discord message,
+                                required when approvals.require_code is on
+  pursestring halts                List halts in force
   pursestring log [-n 20]          Show the latest decision-log entries
   pursestring verify-log           Check the decision log's hash chain; exits 1 and names the first
                                 bad line if an entry was edited, deleted, inserted or reordered
@@ -51,6 +57,12 @@ Environment:
                        Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET
                        Enable the paypal rail (pays vendors' PayPal or Venmo accounts on file; sandbox by default)
+  STRIPE_SECRET_KEY    Enables the stripe_connect rail (transfers to a vendor's connected account; test keys only by default)
+  RAZORPAYX_KEY_ID, RAZORPAYX_KEY_SECRET, RAZORPAYX_ACCOUNT_NUMBER
+                       Enable the razorpayx rail (INR payouts to a vendor's fund account; test keys only by default)
+  MODERN_TREASURY_ORGANIZATION_ID, MODERN_TREASURY_API_KEY, MODERN_TREASURY_ORIGINATING_ACCOUNT_ID
+                       Enable the modern_treasury rail (ACH payment orders to a vendor's external account)
+  X402_PRIVATE_KEY     Wallet key that signs x402 USDC payments (with x402.enabled in policies.yaml)
   PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
                           PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
@@ -100,6 +112,8 @@ async function main() {
       note: { type: "string" },
       code: { type: "string" },
       merchant: { type: "string" },
+      agent: { type: "string" },
+      reason: { type: "string" },
       n: { type: "string", short: "n" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
@@ -168,6 +182,25 @@ async function main() {
         code: values.code,
       });
       console.log(`${rec.intent_id} is now ${rec.status}.`);
+      return;
+    }
+    case "halt": {
+      const { gov } = build();
+      const h = await gov.halt({ agent_id: values.agent, reason: values.reason ?? "halted from the terminal", by: values.by ?? process.env.USER ?? "cli", via: "cli" });
+      console.log(`Spending halted for ${h.scope === "all" ? "all agents" : h.agent_id} since ${h.tripped_at}: ${h.reason}`);
+      return;
+    }
+    case "resume": {
+      const { gov } = build();
+      const h = gov.resume({ agent_id: values.agent, by: values.by ?? process.env.USER ?? "cli", via: "cli", code: values.code });
+      console.log(`Spending resumed for ${h.scope === "all" ? "all agents" : h.agent_id}.`);
+      return;
+    }
+    case "halts": {
+      const { gov } = build();
+      const rows = gov.activeHalts();
+      if (!rows.length) return void console.log("No halts in force.");
+      for (const h of rows) console.log(`${h.scope === "all" ? "ALL AGENTS" : h.agent_id}  since ${h.tripped_at}  by ${h.by}: ${h.reason}`);
       return;
     }
     case "simulate-charge": {

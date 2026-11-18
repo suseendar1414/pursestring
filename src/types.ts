@@ -78,6 +78,8 @@ export interface IntentRecord {
   card?: CardReference;
   /** Set when a payout rail (PayPal, Venmo) paid the vendor directly instead of issuing a card. */
   payment?: PaymentRecord;
+  /** Set when this intent pays for an HTTP resource over x402. */
+  x402?: X402Record;
   /** Set when this intent governs a call to one of PayPal's own MCP tools instead of a purchase. */
   action?: ActionRecord;
   /** Real-time authorization decisions made against this intent's card. */
@@ -150,12 +152,25 @@ export interface CardDetails extends CardReference {
 export type PayeeType = "EMAIL" | "PHONE" | "PAYPAL_ID";
 export type PayeeWallet = "PAYPAL" | "VENMO";
 
-/** Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent. */
+/**
+ * Where a payout rail sends money. Comes from the payee directory in policies.yaml, never from the agent.
+ * Each rail reads its own field: paypal `receiver` (with `type` and `wallet`), stripe_connect `stripe_account`,
+ * razorpayx `razorpayx_fund_account`, modern_treasury `modern_treasury_account`.
+ */
 export interface Payee {
-  receiver: string;
-  type: PayeeType;
-  wallet: PayeeWallet;
+  receiver?: string;
+  type?: PayeeType;
+  wallet?: PayeeWallet;
+  /** Stripe connected account ID (acct_...). */
+  stripe_account?: string;
+  /** RazorpayX fund account ID (fa_...). */
+  razorpayx_fund_account?: string;
+  /** Modern Treasury external account ID (the receiving account). */
+  modern_treasury_account?: string;
 }
+
+/** The payee fields a payout rail can pay to. */
+export type PayeeDestinationField = "receiver" | "stripe_account" | "razorpayx_fund_account" | "modern_treasury_account";
 
 /** What we persist about a payout. */
 export interface PaymentRecord {
@@ -167,7 +182,36 @@ export interface PaymentRecord {
   amount: number;
   currency: string;
   payee: Payee;
+  /** The account the money went to, as the rail names it: a PayPal email, acct_..., fa_..., an external account ID. */
+  paid_to?: string;
   sent_at: string;
+}
+
+/** What PurseString agreed to pay for an x402 resource, and what came back. */
+export interface X402Record {
+  url: string;
+  method: "GET" | "POST";
+  /** CAIP-2 network, e.g. eip155:84532. */
+  network: string;
+  /** Token contract (USDC). */
+  asset: string;
+  pay_to: string;
+  /** Exact price in the token's atomic units (USDC: millionths of a dollar). The intent amount is this rounded up to a cent. */
+  amount_atomic: string;
+  /** The signed authorization, kept so a retry re-sends the same one: its nonce can settle on chain only once. */
+  authorization?: {
+    signature: string;
+    nonce: string;
+    valid_before: string;
+    from: string;
+    /** The exact payment header sent (PAYMENT-SIGNATURE or X-PAYMENT). */
+    header: { name: string; value: string };
+  };
+  /** On-chain transaction the server reported settling. */
+  transaction?: string;
+  paid_at?: string;
+  /** The paid response, kept so a repeat returns it without paying again. Cut to x402.max_response_bytes. */
+  response?: { status: number; content_type?: string; body: string; truncated: boolean };
 }
 
 /** A call to a PayPal MCP tool, held until policy or a human allows it, then run once. */

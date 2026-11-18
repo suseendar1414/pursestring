@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
+import type { HaltRecord } from "./killswitch.js";
 import type { IntentRecord, RefundRecord } from "./types.js";
 import { formatMajor, formatMoney } from "./money.js";
 import { signStandardWebhook } from "./webhooks.js";
@@ -24,6 +25,8 @@ export interface RefundNotice {
 export interface Notifier {
   approvalRequested(rec: IntentRecord, extras?: ApprovalRequestExtras): Promise<void>;
   refundRecorded?(notice: RefundNotice): Promise<void>;
+  /** Spending was halted, by a person or by loop detection. `code` is the one-time code a terminal resume needs. */
+  killSwitchTripped?(halt: HaltRecord, extras?: ApprovalRequestExtras): Promise<void>;
 }
 
 /** The JSON sent to REFUND_WEBHOOK_URL. Stable field names: other systems parse this. */
@@ -159,6 +162,38 @@ export class WebhookNotifier implements Notifier {
     }
     const results = await Promise.allSettled(jobs);
     for (const r of results) if (r.status === "rejected") this.log(`[pursestring] notification failed: ${r.reason}`);
+  }
+
+  async killSwitchTripped(halt: HaltRecord, extras: ApprovalRequestExtras = {}): Promise<void> {
+    const who = halt.scope === "all" ? "all agents" : `agent ${halt.agent_id}`;
+    const flag = halt.scope === "all" ? "" : ` --agent ${halt.agent_id}`;
+    const title = `:octagonal_sign: Spending halted for ${who}`;
+    const lines = [
+      `*Why:* ${halt.reason}`,
+      `*By:* ${halt.by}`,
+      "New purchases are denied, approved ones can't be paid, and card charges decline until a human resumes.",
+      `Resume: \`pursestring resume${flag}${extras.code ? ` --code ${extras.code}` : ""}\``,
+      ...(extras.code ? ["_Keep the code to yourself: it's what stops the agent resuming itself._"] : []),
+    ];
+    const jobs: Promise<void>[] = [];
+    const { slackWebhookUrl, discordWebhookUrl } = this.config.env;
+    if (slackWebhookUrl) {
+      jobs.push(
+        post(slackWebhookUrl, {
+          text: title,
+          blocks: [
+            { type: "section", text: { type: "mrkdwn", text: `*${title}*` } },
+            { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } },
+          ],
+        }),
+      );
+    }
+    if (discordWebhookUrl) {
+      jobs.push(post(discordWebhookUrl, { content: [title.replace(":octagonal_sign:", "🛑"), ...lines].join("\n").replace(/\*/g, "**") }));
+    }
+    if (jobs.length === 0) this.log(`[pursestring] ${title.replace(/:[a-z_]+: /, "")}: ${halt.reason}`);
+    const results = await Promise.allSettled(jobs);
+    for (const r of results) if (r.status === "rejected") this.log(`[pursestring] kill-switch notification failed: ${r.reason}`);
   }
 
   /**
