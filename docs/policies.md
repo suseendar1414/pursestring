@@ -69,9 +69,13 @@ adapter:
   type: mock                      # default rail: mock | lithic | privacy | airwallex | paypal | highnote | marqeta | amex | network_token | ach
   lithic:
     environment: sandbox          # sandbox | production
-  airwallex:
+  airwallex:                       # used by both the airwallex (cards) and airwallex_payouts rails
     environment: sandbox          # sandbox (Airwallex demo) | production
     cardholder_id:                # or AIRWALLEX_CARDHOLDER_ID
+    created_by:                   # full legal name of the person requesting cards (default "PurseString")
+    account_id:                   # or AIRWALLEX_ACCOUNT_ID; only when one API key covers several accounts
+    payout_reason:                # reason on each transfer (default professional_business_services)
+    transfer_method:              # LOCAL | SWIFT; unset = the beneficiary's first saved method
   paypal:
     environment: sandbox          # sandbox | production
 
@@ -111,7 +115,7 @@ routes:
 
 `privacy` issues [Privacy.com](https://privacy.com) cards funded from the user's own bank account or debit card; set `PRIVACY_API_KEY`. Privacy.com has no sandbox, so these are real cards, and it only takes whole-dollar limits, so a $12.40 approval gets a $13 cap. It also has no real-time authorization hook, so the `jit` checks don't apply to it.
 
-`airwallex` issues [Airwallex Issuing](https://www.airwallex.com/docs/issuing) virtual cards, which work for businesses outside the US (Airwallex issues in 50+ countries, including the UK, the EEA, Australia, Canada, Hong Kong, Singapore and New Zealand). Set `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY` and `AIRWALLEX_CARDHOLDER_ID`; the key needs Issuing and card-details access, and the cardholder must be `READY`. Cards are capped in the purchase's own currency, so a EUR approval gets a EUR limit. One-time spends get a single-use card; recurring spends get a multi-use card with a monthly cap, which unlike Lithic is not locked to one merchant. `adapter.airwallex.environment` defaults to `sandbox`, which is Airwallex's demo environment. Airwallex's real-time authorization (Remote Authorization) isn't wired up yet, so the `jit` checks don't apply to it.
+`airwallex` issues [Airwallex Issuing](https://www.airwallex.com/docs/issuing) virtual cards, which work for businesses outside the US (Airwallex issues in 50+ countries, including the UK, the EEA, Australia, Canada, Hong Kong, Singapore and New Zealand). Set `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY` and `AIRWALLEX_CARDHOLDER_ID`; the key needs Issuing and card-details access, and the cardholder must be `READY`. Set `adapter.airwallex.created_by` to the full legal name of the person requesting the cards, which is what Airwallex asks for in that field. Cards are capped in the purchase's own currency, so a EUR approval gets a EUR limit. One-time spends get a single-use card; recurring spends get a multi-use card with a monthly cap, which unlike Lithic is not locked to one merchant. `adapter.airwallex.environment` defaults to `sandbox`, which is Airwallex's demo environment (`api-demo.airwallex.com`, the host Airwallex's own SDK and developer MCP server use; set `adapter.airwallex.base_url: https://api.sandbox.airwallex.com` for the newer sandbox hostname). Airwallex keys don't say which environment they belong to, but a production key can't log in to the sandbox, so nothing real moves until you set `environment: production`. Airwallex's real-time authorization (Remote Authorization) isn't wired up yet, so the `jit` checks don't apply to it.
 
 `paypal` doesn't issue a card. It pays the vendor directly with [PayPal Payouts](https://developer.paypal.com/docs/api/payments.payouts-batch/v1/), to the vendor's PayPal or Venmo account listed under `payees`. The agent calls `send_payment` instead of `request_ephemeral_card` and never chooses the recipient, so a vendor with no `payees` entry can't be paid this way. Each intent is paid at most once. Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`; `adapter.paypal.environment` defaults to `sandbox`. Payouts are one-off, so route recurring spend to a card rail. Step-by-step sandbox setup: [paypal.md](paypal.md).
 
@@ -123,13 +127,14 @@ payees:
     wallet: PAYPAL                # PAYPAL | VENMO
 ```
 
-Three more payout rails work the same way: the agent calls `send_payment`, the money goes only to the destination on file under `payees`, and each intent is paid at most once (the intent ID is the provider's idempotency key). Each rail reads its own field on a payee entry, so one vendor can have entries for several rails; the first entry for the vendor that has the rail's field is used. None of them has been run against a live account yet: they're built from each provider's API reference and tested against stubbed responses.
+Four more payout rails work the same way: the agent calls `send_payment`, the money goes only to the destination on file under `payees`, and each intent is paid at most once (the intent ID is the provider's idempotency key). Each rail reads its own field on a payee entry, so one vendor can have entries for several rails; the first entry for the vendor that has the rail's field is used. None of them has been run against a live account yet: they're built from each provider's API reference and tested against stubbed responses.
 
 | Rail | Pays | Payee field | Credentials |
 |---|---|---|---|
 | `stripe_connect` | A [Stripe Connect transfer](https://docs.stripe.com/api/transfers/create) from your platform balance to the vendor's connected account. Stripe pays that account out to its bank on its own schedule. | `stripe_account: acct_...` | `STRIPE_SECRET_KEY`. Only test-mode keys (`sk_test_`, `rk_test_`) unless `adapter.stripe_connect.environment: production`. |
 | `razorpayx` | A [RazorpayX payout](https://razorpay.com/docs/api/x/payouts/) in INR from your RazorpayX account to the vendor's bank account or UPI ID. Low-balance payouts fail instead of queueing. | `razorpayx_fund_account: fa_...` | `RAZORPAYX_KEY_ID`, `RAZORPAYX_KEY_SECRET`, `RAZORPAYX_ACCOUNT_NUMBER` (or `adapter.razorpayx.account_number`). Only `rzp_test_` keys unless `adapter.razorpayx.environment: production`. `adapter.razorpayx.mode` is `IMPS` by default (`NEFT`, `RTGS`, `UPI`). |
 | `modern_treasury` | A [Modern Treasury payment order](https://docs.moderntreasury.com/payments/reference/create-payment-order) (ACH credit by default) from your internal account to the vendor's external account. | `modern_treasury_account: <external account ID>` | `MODERN_TREASURY_ORGANIZATION_ID`, `MODERN_TREASURY_API_KEY`, `MODERN_TREASURY_ORIGINATING_ACCOUNT_ID` (or `adapter.modern_treasury.originating_account_id`). `adapter.modern_treasury.payment_type` is `ach` by default. Whether real money moves depends on the organization: use a sandbox organization to test. |
+| `airwallex_payouts` | An [Airwallex transfer](https://www.airwallex.com/docs/payouts) from your Airwallex balance to a beneficiary you already saved (and ideally verified) in Airwallex. No currency conversion: the intent's currency must be the beneficiary's account currency and a balance you hold, and Airwallex's transfer fee is charged to you on top (`fee_paid_by: PAYER`). The transfer method is the beneficiary's own (`LOCAL` or `SWIFT`) unless `adapter.airwallex.transfer_method` says otherwise. | `airwallex_beneficiary: <beneficiary ID>` | `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY` (the same as the card rail; no cardholder needed). Sandbox unless `adapter.airwallex.environment: production`. |
 
 ```yaml
 routes:
@@ -144,6 +149,8 @@ payees:
     razorpayx_fund_account: fa_00000000000001
   - vendor: acme-supplies.com
     modern_treasury_account: 0f8e3719-3dfd-4613-9bbf-c0333781b59f
+  - vendor: sydney-printing.com.au
+    airwallex_beneficiary: 8365ea88-2946-4877-abe1-e02a1015288d
 ```
 
 `highnote`, `marqeta`, `amex`, `network_token` and `ach` are planned: you can route to them now, and a purchase that lands there stops with a link to the tracking issue rather than using another rail.
