@@ -3,7 +3,7 @@
   "name": "io.github.suseendar1414/pursestring",
   "title": "PurseString",
   "description": "Spend policy and human approvals for AI agents, checked before a single-use capped card is issued.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/suseendar1414/pursestring",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "pursestring",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         { "name": "PURSESTRING_POLICY", "description": "Path to policies.yaml (default ./policies.yaml, then ~/.pursestring/policies.yaml)", "isRequired": false },
