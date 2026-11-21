@@ -609,7 +609,7 @@ export class Governance {
   }
 
   /**
-   * Pay an approved intent through a payout rail (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury). The money goes to the vendor's account from the
+   * Pay an approved intent through a payout rail (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury, Airwallex). The money goes to the vendor's account from the
    * payee directory in policies.yaml, never to an address the agent supplies. An intent is paid at most once:
    * calling again returns the existing payment, and the rail itself is told the intent ID so a crash mid-call
    * can't double-pay on retry either.

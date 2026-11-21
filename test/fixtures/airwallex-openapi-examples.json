@@ -1,0 +1,1073 @@
+{
+  "_source": "Response examples copied verbatim from the Airwallex OpenAPI spec 2026-08-21 (https://github.com/airwallex/airwallex-openapi, MIT License, Copyright (c) Airwallex), commit 2bacde9.",
+  "login_201": {
+    "token": "eyJhbGciOiJSUzI1NiJ9.eyJpYXQiOjE2MjQwMDAwMDAsImV4cCI6MTYyNDAwMTgwMH0.example",
+    "expires_at": "2021-06-18T16:30:00+0000"
+  },
+  "card_create_202": {
+    "activate_on_issue": false,
+    "additional_cardholder_ids": [
+      "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+      "b0a1b145-4853-4456-b4b3-d690c7f3535c"
+    ],
+    "auto_close_date": "2027-01-31",
+    "alert_settings": {
+      "low_remaining_transaction_limit": {
+        "enabled": false,
+        "percent": 10
+      }
+    },
+    "all_card_versions": [
+      {
+        "card_number": "************4111",
+        "card_status": "ACTIVE",
+        "card_version": 1,
+        "created_at": "2024-01-09T00:00:00+0000"
+      }
+    ],
+    "authorization_controls": {
+      "active_from": "2018-10-31T00:00:00+0000",
+      "active_to": "2018-10-31T00:00:00+0000",
+      "allowed_currencies": [
+        "USD",
+        "AUD"
+      ],
+      "allowed_merchant_brands": {
+        "categories": [
+          "10000",
+          "16000"
+        ],
+        "ids": [
+          "245e5003-58ec-540c-89a0-e148e54c2518"
+        ],
+        "subcategories": [
+          "10001",
+          "16003"
+        ]
+      },
+      "allowed_merchant_categories": [
+        "7531",
+        "7534"
+      ],
+      "allowed_merchant_countries": [
+        "US",
+        "AU"
+      ],
+      "allowed_transaction_count": "SINGLE",
+      "blocked_transaction_usages": [
+        {
+          "transaction_scope": "MAGSTRIPE",
+          "usage_scope": "INTERNATIONAL"
+        },
+        {
+          "transaction_scope": "ONLINE_TRANSACTION",
+          "usage_scope": "ALL"
+        }
+      ],
+      "transaction_limits": {
+        "cash_withdrawal_limits": [
+          {
+            "amount": 1000,
+            "interval": "PER_TRANSACTION"
+          }
+        ],
+        "currency": "USD",
+        "limits": [
+          {
+            "amount": 1000,
+            "interval": "PER_TRANSACTION"
+          }
+        ]
+      }
+    },
+    "brand": "visa",
+    "card_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "card_number": "************4111",
+    "card_status": "ACTIVE",
+    "card_version": 1,
+    "cardholder_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "client_data": "20190817_dfelsflkj73494lksdfg9480ww",
+    "created_at": "2024-01-09T00:00:00+0000",
+    "created_by": "<string>",
+    "delivery_details": {
+      "delivery_mode": "MAIL",
+      "delivery_vendor": "DHL",
+      "mobile_number": "+6512345678",
+      "preferred_delivery_mode": "MAIL",
+      "status": "DISPATCHED",
+      "status_description": "The card has been printed.",
+      "tracked": true,
+      "tracking_link": "https://www.dhl.com/global-en/home/tracking/tracking-parcel.html?submit=1&tracking-id=ABCD1234",
+      "tracking_number": "ABCD1234",
+      "updated_at": "2024-01-09T00:00:00+0000"
+    },
+    "form_factor": "VIRTUAL",
+    "funding_source_id": "6682111f-cb4a-47ce-8e95-5abcc5394727",
+    "is_personalized": true,
+    "issue_to": "ORGANISATION",
+    "metadata": {
+      "key1": "value1",
+      "key2": "value2"
+    },
+    "name_on_card": "John Smith",
+    "nick_name": "travelling",
+    "note": "This is my first card.",
+    "postal_address": {
+      "city": "Melbourne",
+      "country": "AU",
+      "line1": "44 Gillespie St",
+      "line2": "Unit 2",
+      "postcode": "3121",
+      "state": "VIC"
+    },
+    "primary_contact_details": {
+      "email": "john@example.com",
+      "full_name": "John Smith",
+      "mobile_number": "619922334321"
+    },
+    "program": {
+      "interchange_percent": "1.0",
+      "purpose": "COMMERCIAL",
+      "sub_type": "GOOD_FUNDS_CREDIT",
+      "type": "PREPAID"
+    },
+    "purpose": "BUSINESS_EXPENSES",
+    "request_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "updated_at": "2024-01-09T00:00:00+0000"
+  },
+  "card_get_200": {
+    "activate_on_issue": false,
+    "additional_cardholder_ids": [
+      "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+      "b0a1b145-4853-4456-b4b3-d690c7f3535c"
+    ],
+    "auto_close_date": "2027-01-31",
+    "alert_settings": {
+      "low_remaining_transaction_limit": {
+        "enabled": false,
+        "percent": 10
+      }
+    },
+    "all_card_versions": [
+      {
+        "card_number": "************4111",
+        "card_status": "ACTIVE",
+        "card_version": 1,
+        "created_at": "2024-01-09T00:00:00+0000"
+      }
+    ],
+    "authorization_controls": {
+      "active_from": "2018-10-31T00:00:00+0000",
+      "active_to": "2018-10-31T00:00:00+0000",
+      "allowed_currencies": [
+        "USD",
+        "AUD"
+      ],
+      "allowed_merchant_brands": {
+        "categories": [
+          "10000",
+          "16000"
+        ],
+        "ids": [
+          "245e5003-58ec-540c-89a0-e148e54c2518"
+        ],
+        "subcategories": [
+          "10001",
+          "16003"
+        ]
+      },
+      "allowed_merchant_categories": [
+        "7531",
+        "7534"
+      ],
+      "allowed_merchant_countries": [
+        "US",
+        "AU"
+      ],
+      "allowed_transaction_count": "SINGLE",
+      "blocked_transaction_usages": [
+        {
+          "transaction_scope": "MAGSTRIPE",
+          "usage_scope": "INTERNATIONAL"
+        },
+        {
+          "transaction_scope": "ONLINE_TRANSACTION",
+          "usage_scope": "ALL"
+        }
+      ],
+      "transaction_limits": {
+        "cash_withdrawal_limits": [
+          {
+            "amount": 1000,
+            "interval": "PER_TRANSACTION"
+          }
+        ],
+        "currency": "USD",
+        "limits": [
+          {
+            "amount": 1000,
+            "interval": "PER_TRANSACTION"
+          }
+        ]
+      }
+    },
+    "brand": "visa",
+    "card_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "card_number": "************4111",
+    "card_status": "ACTIVE",
+    "card_version": 1,
+    "cardholder_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "client_data": "20190817_dfelsflkj73494lksdfg9480ww",
+    "created_at": "2024-01-09T00:00:00+0000",
+    "created_by": "<string>",
+    "delivery_details": {
+      "delivery_mode": "MAIL",
+      "delivery_vendor": "DHL",
+      "mobile_number": "+6512345678",
+      "preferred_delivery_mode": "MAIL",
+      "status": "DISPATCHED",
+      "status_description": "The card has been printed.",
+      "tracked": true,
+      "tracking_link": "https://www.dhl.com/global-en/home/tracking/tracking-parcel.html?submit=1&tracking-id=ABCD1234",
+      "tracking_number": "ABCD1234",
+      "updated_at": "2024-01-09T00:00:00+0000"
+    },
+    "form_factor": "VIRTUAL",
+    "funding_source_id": "6682111f-cb4a-47ce-8e95-5abcc5394727",
+    "is_personalized": true,
+    "issue_to": "ORGANISATION",
+    "metadata": {
+      "key1": "value1",
+      "key2": "value2"
+    },
+    "name_on_card": "John Smith",
+    "nick_name": "travelling",
+    "note": "This is my first card.",
+    "postal_address": {
+      "city": "Melbourne",
+      "country": "AU",
+      "line1": "44 Gillespie St",
+      "line2": "Unit 2",
+      "postcode": "3121",
+      "state": "VIC"
+    },
+    "primary_contact_details": {
+      "email": "john@example.com",
+      "full_name": "John Smith",
+      "mobile_number": "619922334321"
+    },
+    "program": {
+      "interchange_percent": "1.0",
+      "purpose": "COMMERCIAL",
+      "sub_type": "GOOD_FUNDS_CREDIT",
+      "type": "PREPAID"
+    },
+    "purpose": "BUSINESS_EXPENSES",
+    "request_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "updated_at": "2024-01-09T00:00:00+0000"
+  },
+  "card_list_200": {
+    "has_more": false,
+    "items": [
+      {
+        "additional_cardholder_ids": [
+          "7f0216e7-0348-4a36-9871-d1ba82c13410",
+          "b0a1b145-4853-4456-b4b3-d690c7f3535c"
+        ],
+        "brand": "visa",
+        "card_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+        "card_number": "************4111",
+        "card_status": "ACTIVE",
+        "cardholder_id": "7f0216e7-0348-4a36-9871-d1ba82c13410",
+        "created_at": "2018-10-31T00:00:00+0000",
+        "nick_name": "Travel",
+        "updated_at": "2024-01-09T00:00:00+0000"
+      }
+    ]
+  },
+  "card_details_200": {
+    "card_number": "4111111111111111",
+    "cvv": "123",
+    "expiry_month": 1,
+    "expiry_year": 2022,
+    "name_on_card": "John Smith"
+  },
+  "card_update_200": {
+    "activate_on_issue": false,
+    "additional_cardholder_ids": [
+      "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+      "b0a1b145-4853-4456-b4b3-d690c7f3535c"
+    ],
+    "auto_close_date": "2027-01-31",
+    "alert_settings": {
+      "low_remaining_transaction_limit": {
+        "enabled": false,
+        "percent": 10
+      }
+    },
+    "all_card_versions": [
+      {
+        "card_number": "************4111",
+        "card_status": "ACTIVE",
+        "card_version": 1,
+        "created_at": "2024-01-09T00:00:00+0000"
+      }
+    ],
+    "authorization_controls": {
+      "active_from": "2018-10-31T00:00:00+0000",
+      "active_to": "2018-10-31T00:00:00+0000",
+      "allowed_currencies": [
+        "USD",
+        "AUD"
+      ],
+      "allowed_merchant_categories": [
+        "7531",
+        "7534"
+      ],
+      "allowed_transaction_count": "SINGLE",
+      "allowed_merchant_countries": [
+        "US",
+        "AU"
+      ],
+      "blocked_transaction_usages": [
+        {
+          "transaction_scope": "MAGSTRIPE",
+          "usage_scope": "INTERNATIONAL"
+        },
+        {
+          "transaction_scope": "ONLINE_TRANSACTION",
+          "usage_scope": "ALL"
+        }
+      ],
+      "transaction_limits": {
+        "cash_withdrawal_limits": [
+          {
+            "amount": 1000,
+            "interval": "PER_TRANSACTION"
+          }
+        ],
+        "currency": "USD",
+        "limits": [
+          {
+            "amount": 1000,
+            "interval": "PER_TRANSACTION"
+          }
+        ]
+      }
+    },
+    "brand": "visa",
+    "card_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "card_number": "************4111",
+    "card_status": "ACTIVE",
+    "card_version": 1,
+    "cardholder_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "client_data": "20190817_dfelsflkj73494lksdfg9480ww",
+    "created_at": "2024-01-09T00:00:00+0000",
+    "created_by": "<string>",
+    "delivery_details": {
+      "delivery_mode": "MAIL",
+      "delivery_vendor": "DHL",
+      "mobile_number": "+6512345678",
+      "preferred_delivery_mode": "MAIL",
+      "status": "DISPATCHED",
+      "status_description": "The card has been printed.",
+      "tracked": true,
+      "tracking_link": "https://www.dhl.com/global-en/home/tracking/tracking-parcel.html?submit=1&tracking-id=ABCD1234",
+      "tracking_number": "ABCD1234",
+      "updated_at": "2024-01-09T00:00:00+0000"
+    },
+    "form_factor": "VIRTUAL",
+    "funding_source_id": "6682111f-cb4a-47ce-8e95-5abcc5394727",
+    "is_personalized": true,
+    "issue_to": "ORGANISATION",
+    "metadata": {
+      "key1": "value1",
+      "key2": "value2"
+    },
+    "name_on_card": "John Smith",
+    "nick_name": "travelling",
+    "note": "This is my first card.",
+    "postal_address": {
+      "city": "Melbourne",
+      "country": "AU",
+      "line1": "44 Gillespie St",
+      "line2": "Unit 2",
+      "postcode": "3121",
+      "state": "VIC"
+    },
+    "primary_contact_details": {
+      "email": "john@example.com",
+      "full_name": "John Smith",
+      "mobile_number": "619922334321"
+    },
+    "program": {
+      "interchange_percent": "1.0",
+      "purpose": "COMMERCIAL",
+      "sub_type": "GOOD_FUNDS_CREDIT",
+      "type": "PREPAID"
+    },
+    "purpose": "BUSINESS_EXPENSES",
+    "request_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "updated_at": "2024-01-09T00:00:00+0000"
+  },
+  "beneficiary_get_200": {
+    "beneficiary": {
+      "additional_info": {
+        "business_area": "Travel",
+        "business_phone_number": "689342234",
+        "business_registration_number": "IT593003",
+        "external_identifier": "<string>",
+        "legal_rep_bank_account_number": "44250100003700000000",
+        "legal_rep_first_name_in_chinese": "小芳",
+        "legal_rep_id_number": "110108199304203520",
+        "legal_rep_last_name_in_chinese": "刘",
+        "legal_rep_mobile_number": "13651362890",
+        "personal_email": "john.walker@gmail.com",
+        "personal_first_name_in_chinese": "大明",
+        "personal_id_number": "1234567890",
+        "personal_id_type": "NATIONAL_ID",
+        "personal_last_name_in_chinese": "李",
+        "personal_mobile_number": "13651362890",
+        "recipient_account_id": "<string>",
+        "security_question": "What is the name of my second puppy?",
+        "security_question_answer": "Scooby Doo"
+      },
+      "address": {
+        "city": "Melbourne",
+        "country_code": "AU",
+        "postcode": "3000",
+        "state": "VIC",
+        "street_address": "15 William Street"
+      },
+      "bank_details": {
+        "account_currency": "AUD",
+        "account_name": "Lee Da Ming",
+        "account_name_alias": "Lee D M",
+        "account_number": "12750852",
+        "account_routing_type1": "bsb",
+        "account_routing_type2": "sort_code",
+        "account_routing_value1": "083064",
+        "account_routing_value2": "123456",
+        "bank_account_category": "Checking,Savings,Vista,Maestra",
+        "bank_branch": "Melbourne",
+        "bank_country_code": "AU",
+        "bank_name": "National Australia Bank",
+        "bank_state": "<string>",
+        "bank_street_address": "500 Bourke Street, Melbourne 3000, Australia",
+        "binding_mobile_number": "654897612345",
+        "fingerprint": "2e99758548972a8e8822ad47fa1017ff72f06f3ff6a016851f45c398732bc50c",
+        "iban": "ES8023100001180000012345",
+        "intermediary_bank_name": "National Australia Bank",
+        "intermediary_bank_swift_code": "CTBAAU2S",
+        "local_clearing_system": "ACH",
+        "swift_code": "CTBAAU2S"
+      },
+      "card": {
+        "brand": "VISA",
+        "cardholder_name": "John Walker",
+        "currency": "USD",
+        "expiry_month": "10",
+        "expiry_year": "2033",
+        "number": "************1111",
+        "token": "AKvN4TqxI04SNFZ+oYRXaECtDA=="
+      },
+      "company_name": "Complete Concrete Pty Ltd",
+      "date_of_birth": "1976-08-26",
+      "digital_wallet": {
+        "account_name": "John Walker Corporation",
+        "country_code": "US",
+        "id_type": "account_number",
+        "id_value": "1033106816639334",
+        "provider": "AIRWALLEX"
+      },
+      "entity_type": "COMPANY",
+      "first_name": "John",
+      "last_name": "Walker",
+      "type": "<string>"
+    },
+    "id": "8365ea88-2946-4877-abe1-e02a1015288d",
+    "nickname": "Complete Concrete Pty Ltd",
+    "payer_entity_type": "COMPANY",
+    "sca_exemptible": false,
+    "transfer_methods": [
+      "SWIFT"
+    ]
+  },
+  "transfer_create_201": {
+    "amount_beneficiary_receives": 99996,
+    "amount_payer_pays": 10004,
+    "application_fee_options": [
+      {
+        "amount": "5",
+        "currency": "AUD",
+        "percentage": "0.1",
+        "source_type": "TRANSFER",
+        "type": "FIXED"
+      }
+    ],
+    "application_fees": [
+      {
+        "amount": "5",
+        "currency": "AUD",
+        "source_type": "TRANSFER"
+      }
+    ],
+    "batch_transfer_id": "d9df6d02-4116-4376-82c7-064159cc878e",
+    "beneficiary": {
+      "additional_info": {
+        "business_area": "Travel",
+        "business_phone_number": "689342234",
+        "business_registration_number": "IT593003",
+        "external_identifier": "<string>",
+        "legal_rep_bank_account_number": "44250100003700000000",
+        "legal_rep_first_name_in_chinese": "小芳",
+        "legal_rep_id_number": "110108199304203520",
+        "legal_rep_last_name_in_chinese": "刘",
+        "legal_rep_mobile_number": "13651362890",
+        "personal_email": "john.walker@gmail.com",
+        "personal_first_name_in_chinese": "大明",
+        "personal_id_number": "1234567890",
+        "personal_id_type": "NATIONAL_ID",
+        "personal_last_name_in_chinese": "李",
+        "personal_mobile_number": "13651362890",
+        "recipient_account_id": "<string>",
+        "security_question": "What is the name of my second puppy?",
+        "security_question_answer": "Scooby Doo"
+      },
+      "address": {
+        "city": "Melbourne",
+        "country_code": "AU",
+        "postcode": "3000",
+        "state": "VIC",
+        "street_address": "15 William Street"
+      },
+      "bank_details": {
+        "account_currency": "AUD",
+        "account_name": "Lee Da Ming",
+        "account_name_alias": "Lee D M",
+        "account_number": "12750852",
+        "account_routing_type1": "bsb",
+        "account_routing_type2": "sort_code",
+        "account_routing_value1": "083064",
+        "account_routing_value2": "123456",
+        "bank_account_category": "Checking,Savings,Vista,Maestra",
+        "bank_branch": "Melbourne",
+        "bank_country_code": "AU",
+        "bank_name": "National Australia Bank",
+        "bank_state": "<string>",
+        "bank_street_address": "500 Bourke Street, Melbourne 3000, Australia",
+        "binding_mobile_number": "654897612345",
+        "fingerprint": "2e99758548972a8e8822ad47fa1017ff72f06f3ff6a016851f45c398732bc50c",
+        "iban": "ES8023100001180000012345",
+        "intermediary_bank_name": "National Australia Bank",
+        "intermediary_bank_swift_code": "CTBAAU2S",
+        "local_clearing_system": "ACH",
+        "swift_code": "CTBAAU2S"
+      },
+      "card": {
+        "brand": "VISA",
+        "cardholder_name": "John Walker",
+        "currency": "USD",
+        "expiry_month": "10",
+        "expiry_year": "2033",
+        "number": "************1111",
+        "token": "AKvN4TqxI04SNFZ+oYRXaECtDA=="
+      },
+      "company_name": "Complete Concrete Pty Ltd",
+      "date_of_birth": "1976-08-26",
+      "digital_wallet": {
+        "account_name": "John Walker Corporation",
+        "country_code": "US",
+        "id_type": "account_number",
+        "id_value": "1033106816639334",
+        "provider": "AIRWALLEX"
+      },
+      "entity_type": "COMPANY",
+      "first_name": "John",
+      "last_name": "Walker",
+      "type": "<string>"
+    },
+    "beneficiary_id": "<uuid>",
+    "conversion": {
+      "currency_pair": "USDEUR",
+      "rate": 0.761223
+    },
+    "created_at": "2017-03-22T16:08:02+1100",
+    "dispatch_date": "2017-03-29",
+    "dispatch_info": {
+      "external_reference": "CHK-100012345",
+      "external_reference_type": "PAPER_CHECK_NUMBER"
+    },
+    "failure": {
+      "code": "90502",
+      "message": "Unable to process due to risk concerns.",
+      "details": {
+        "type": "TM_SUSPEND",
+        "reason_codes": [
+          "EXPIRED_TRANSACTION_RFI"
+        ]
+      }
+    },
+    "fee_amount": 4,
+    "fee_currency": "AUD",
+    "fee_paid_by": "PAYER",
+    "funding": {
+      "deposit_type": "DIRECT_DEBIT",
+      "failure_details": {
+        "code": "insufficient_funds",
+        "iso_code": "AM04",
+        "provider_failure_details": {
+          "code": "R01",
+          "local_clearing_system": "US_ACH",
+          "message": "INSUFFICIENT FUNDS"
+        }
+      },
+      "failure_reason": "regulatory_reason",
+      "funding_source_id": "b3856846-31b0-44d8-855d-e0eedf532282",
+      "status": "FUNDED"
+    },
+    "id": "d9af1614-a6a1-4d45-aae7-6858fc6d9ede",
+    "lock_rate_on_create": false,
+    "metadata": {
+      "order_id": "0123456789"
+    },
+    "payer": {
+      "additional_info": {
+        "business_registration_number": "EU300503",
+        "business_registration_type": "Partnership",
+        "external_id": "1234567890",
+        "personal_email": "james.smith@google.com",
+        "personal_id_number": "1234567890"
+      },
+      "address": {
+        "city": "Melbourne",
+        "country_code": "AU",
+        "postcode": "3000",
+        "state": "VIC",
+        "street_address": "15 William Street"
+      },
+      "company_name": "Complete Concrete Pty Ltd",
+      "date_of_birth": "1976-08-26",
+      "entity_type": "COMPANY",
+      "first_name": "James",
+      "last_name": "Smith"
+    },
+    "payer_id": "<uuid>",
+    "prepayment": {
+      "amount": 12.34,
+      "currency": "USD"
+    },
+    "reason": "travel",
+    "reference": "PMT1936398",
+    "remarks": "Any information",
+    "request_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "short_reference_id": "20170322-9F6ML2",
+    "source_amount": 10000,
+    "source_currency": "AUD",
+    "status": "PROCESSING",
+    "swift_charge_option": "SHARED",
+    "transfer_amount": 10000,
+    "transfer_currency": "AUD",
+    "transfer_date": "2017-03-24",
+    "transfer_method": "SWIFT",
+    "updated_at": "2017-03-24T18:00:02+1100"
+  },
+  "transfer_get_200": {
+    "amount_beneficiary_receives": 99996,
+    "amount_payer_pays": 10004,
+    "application_fee_options": [
+      {
+        "amount": "5",
+        "currency": "AUD",
+        "percentage": "0.1",
+        "source_type": "TRANSFER",
+        "type": "FIXED"
+      }
+    ],
+    "application_fees": [
+      {
+        "amount": "5",
+        "currency": "AUD",
+        "source_type": "TRANSFER"
+      }
+    ],
+    "batch_transfer_id": "d9df6d02-4116-4376-82c7-064159cc878e",
+    "beneficiary": {
+      "additional_info": {
+        "business_area": "Travel",
+        "business_phone_number": "689342234",
+        "business_registration_number": "IT593003",
+        "external_identifier": "<string>",
+        "legal_rep_bank_account_number": "44250100003700000000",
+        "legal_rep_first_name_in_chinese": "小芳",
+        "legal_rep_id_number": "110108199304203520",
+        "legal_rep_last_name_in_chinese": "刘",
+        "legal_rep_mobile_number": "13651362890",
+        "personal_email": "john.walker@gmail.com",
+        "personal_first_name_in_chinese": "大明",
+        "personal_id_number": "1234567890",
+        "personal_id_type": "NATIONAL_ID",
+        "personal_last_name_in_chinese": "李",
+        "personal_mobile_number": "13651362890",
+        "recipient_account_id": "<string>",
+        "security_question": "What is the name of my second puppy?",
+        "security_question_answer": "Scooby Doo"
+      },
+      "address": {
+        "city": "Melbourne",
+        "country_code": "AU",
+        "postcode": "3000",
+        "state": "VIC",
+        "street_address": "15 William Street"
+      },
+      "bank_details": {
+        "account_currency": "AUD",
+        "account_name": "Lee Da Ming",
+        "account_name_alias": "Lee D M",
+        "account_number": "12750852",
+        "account_routing_type1": "bsb",
+        "account_routing_type2": "sort_code",
+        "account_routing_value1": "083064",
+        "account_routing_value2": "123456",
+        "bank_account_category": "Checking,Savings,Vista,Maestra",
+        "bank_branch": "Melbourne",
+        "bank_country_code": "AU",
+        "bank_name": "National Australia Bank",
+        "bank_state": "<string>",
+        "bank_street_address": "500 Bourke Street, Melbourne 3000, Australia",
+        "binding_mobile_number": "654897612345",
+        "fingerprint": "2e99758548972a8e8822ad47fa1017ff72f06f3ff6a016851f45c398732bc50c",
+        "iban": "ES8023100001180000012345",
+        "intermediary_bank_name": "National Australia Bank",
+        "intermediary_bank_swift_code": "CTBAAU2S",
+        "local_clearing_system": "ACH",
+        "swift_code": "CTBAAU2S"
+      },
+      "card": {
+        "brand": "VISA",
+        "cardholder_name": "John Walker",
+        "currency": "USD",
+        "expiry_month": "10",
+        "expiry_year": "2033",
+        "number": "************1111",
+        "token": "AKvN4TqxI04SNFZ+oYRXaECtDA=="
+      },
+      "company_name": "Complete Concrete Pty Ltd",
+      "date_of_birth": "1976-08-26",
+      "digital_wallet": {
+        "account_name": "John Walker Corporation",
+        "country_code": "US",
+        "id_type": "account_number",
+        "id_value": "1033106816639334",
+        "provider": "AIRWALLEX"
+      },
+      "entity_type": "COMPANY",
+      "first_name": "John",
+      "last_name": "Walker",
+      "type": "<string>"
+    },
+    "beneficiary_id": "<uuid>",
+    "conversion": {
+      "currency_pair": "USDEUR",
+      "rate": 0.761223
+    },
+    "created_at": "2017-03-22T16:08:02+1100",
+    "dispatch_date": "2017-03-29",
+    "dispatch_info": {
+      "external_reference": "CHK-100012345",
+      "external_reference_type": "PAPER_CHECK_NUMBER"
+    },
+    "failure": {
+      "code": "90502",
+      "message": "Unable to process due to risk concerns.",
+      "details": {
+        "type": "TM_SUSPEND",
+        "reason_codes": [
+          "EXPIRED_TRANSACTION_RFI"
+        ]
+      }
+    },
+    "fee_amount": 4,
+    "fee_currency": "AUD",
+    "fee_paid_by": "PAYER",
+    "funding": {
+      "deposit_type": "DIRECT_DEBIT",
+      "failure_details": {
+        "code": "insufficient_funds",
+        "iso_code": "AM04",
+        "provider_failure_details": {
+          "code": "R01",
+          "local_clearing_system": "US_ACH",
+          "message": "INSUFFICIENT FUNDS"
+        }
+      },
+      "failure_reason": "regulatory_reason",
+      "funding_source_id": "b3856846-31b0-44d8-855d-e0eedf532282",
+      "status": "FUNDED"
+    },
+    "id": "d9af1614-a6a1-4d45-aae7-6858fc6d9ede",
+    "lock_rate_on_create": false,
+    "metadata": {
+      "order_id": "0123456789"
+    },
+    "payer": {
+      "additional_info": {
+        "business_registration_number": "EU300503",
+        "business_registration_type": "Partnership",
+        "external_id": "1234567890",
+        "personal_email": "james.smith@google.com",
+        "personal_id_number": "1234567890"
+      },
+      "address": {
+        "city": "Melbourne",
+        "country_code": "AU",
+        "postcode": "3000",
+        "state": "VIC",
+        "street_address": "15 William Street"
+      },
+      "company_name": "Complete Concrete Pty Ltd",
+      "date_of_birth": "1976-08-26",
+      "entity_type": "COMPANY",
+      "first_name": "James",
+      "last_name": "Smith"
+    },
+    "payer_id": "<uuid>",
+    "prepayment": {
+      "amount": 12.34,
+      "currency": "USD"
+    },
+    "reason": "travel",
+    "reference": "PMT1936398",
+    "remarks": "Any information",
+    "request_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+    "short_reference_id": "20170322-9F6ML2",
+    "source_amount": 10000,
+    "source_currency": "AUD",
+    "status": "PROCESSING",
+    "swift_charge_option": "SHARED",
+    "transfer_amount": 10000,
+    "transfer_currency": "AUD",
+    "transfer_date": "2017-03-24",
+    "transfer_method": "SWIFT",
+    "updated_at": "2017-03-24T18:00:02+1100"
+  },
+  "transfer_list_200": {
+    "items": [
+      {
+        "amount_beneficiary_receives": 99996,
+        "amount_payer_pays": 10004,
+        "application_fee_options": [
+          {
+            "amount": "5",
+            "currency": "AUD",
+            "percentage": "0.1",
+            "source_type": "TRANSFER",
+            "type": "FIXED"
+          }
+        ],
+        "application_fees": [
+          {
+            "amount": "5",
+            "currency": "AUD",
+            "source_type": "TRANSFER"
+          }
+        ],
+        "batch_transfer_id": "d9df6d02-4116-4376-82c7-064159cc878e",
+        "beneficiary": {
+          "additional_info": {
+            "business_area": "Travel",
+            "business_phone_number": "689342234",
+            "business_registration_number": "IT593003",
+            "legal_rep_bank_account_number": "44250100003700000000",
+            "legal_rep_first_name_in_chinese": "小芳",
+            "legal_rep_id_number": "110108199304203520",
+            "legal_rep_last_name_in_chinese": "刘",
+            "legal_rep_mobile_number": "13651362890",
+            "personal_email": "john.walker@gmail.com",
+            "personal_first_name_in_chinese": "大明",
+            "personal_id_number": "1234567890",
+            "personal_id_type": "NATIONAL_ID",
+            "personal_last_name_in_chinese": "李",
+            "personal_mobile_number": "13651362890",
+            "security_question": "What is the name of my second puppy?",
+            "security_question_answer": "Scooby Doo"
+          },
+          "address": {
+            "city": "Melbourne",
+            "country_code": "AU",
+            "postcode": "3000",
+            "state": "VIC",
+            "street_address": "15 William Street"
+          },
+          "bank_details": {
+            "account_currency": "AUD",
+            "account_name": "Lee Da Ming",
+            "account_name_alias": "Lee D M",
+            "account_number": "12750852",
+            "account_routing_type1": "bsb",
+            "account_routing_type2": "sort_code",
+            "account_routing_value1": "083064",
+            "account_routing_value2": "123456",
+            "bank_account_category": "Checking,Savings,Vista,Maestra",
+            "bank_branch": "Melbourne",
+            "bank_country_code": "AU",
+            "bank_name": "National Australia Bank",
+            "bank_street_address": "500 Bourke Street, Melbourne 3000, Australia",
+            "binding_mobile_number": "654897612345",
+            "fingerprint": "2e99758548972a8e8822ad47fa1017ff72f06f3ff6a016851f45c398732bc50c",
+            "iban": "ES8023100001180000012345",
+            "intermediary_bank_name": "National Australia Bank",
+            "intermediary_bank_swift_code": "CTBAAU2S",
+            "local_clearing_system": "ACH",
+            "swift_code": "CTBAAU2S"
+          },
+          "card": {
+            "brand": "VISA",
+            "cardholder_name": "John Walker",
+            "currency": "USD",
+            "expiry_month": "10",
+            "expiry_year": "2033",
+            "number": "************1111",
+            "token": "AKvN4TqxI04SNFZ+oYRXaECtDA=="
+          },
+          "company_name": "Complete Concrete Pty Ltd",
+          "date_of_birth": "1976-08-26",
+          "digital_wallet": {
+            "account_name": "John Walker Corporation",
+            "country_code": "US",
+            "id_type": "account_number",
+            "id_value": "1033106816639334",
+            "provider": "AIRWALLEX"
+          },
+          "entity_type": "COMPANY",
+          "first_name": "John",
+          "last_name": "Walker"
+        },
+        "conversion": {
+          "currency_pair": "USDEUR",
+          "rate": 0.761223
+        },
+        "created_at": "2017-03-22T16:08:02+1100",
+        "dispatch_date": "2017-03-29",
+        "dispatch_info": {
+          "external_reference": "CHK-100012345",
+          "external_reference_type": "PAPER_CHECK_NUMBER"
+        },
+        "failure": {
+          "code": "90502",
+          "message": "Unable to process due to risk concerns.",
+          "details": {
+            "type": "TM_SUSPEND",
+            "reason_codes": [
+              "EXPIRED_TRANSACTION_RFI"
+            ]
+          }
+        },
+        "fee_amount": 4,
+        "fee_currency": "AUD",
+        "fee_paid_by": "PAYER",
+        "funding": {
+          "deposit_type": "DIRECT_DEBIT",
+          "failure_details": {
+            "code": "insufficient_funds",
+            "iso_code": "AM04",
+            "provider_failure_details": {
+              "code": "R01",
+              "local_clearing_system": "US_ACH",
+              "message": "INSUFFICIENT FUNDS"
+            }
+          },
+          "failure_reason": "regulatory_reason",
+          "funding_source_id": "b3856846-31b0-44d8-855d-e0eedf532282",
+          "status": "FUNDED"
+        },
+        "id": "d9af1614-a6a1-4d45-aae7-6858fc6d9ede",
+        "metadata": {
+          "order_id": "0123456789"
+        },
+        "payer": {
+          "additional_info": {
+            "business_registration_number": "EU300503",
+            "business_registration_type": "Partnership",
+            "external_id": "1234567890",
+            "personal_email": "james.smith@google.com",
+            "personal_id_number": "1234567890"
+          },
+          "address": {
+            "city": "Melbourne",
+            "country_code": "AU",
+            "postcode": "3000",
+            "state": "VIC",
+            "street_address": "15 William Street"
+          },
+          "company_name": "Complete Concrete Pty Ltd",
+          "date_of_birth": "1976-08-26",
+          "entity_type": "COMPANY",
+          "first_name": "James",
+          "last_name": "Smith"
+        },
+        "prepayment": {
+          "amount": 12.34,
+          "currency": "USD"
+        },
+        "reason": "travel",
+        "reference": "PMT1936398",
+        "remarks": "Any information",
+        "request_id": "7f687fe6-dcf4-4462-92fa-80335301d9d2",
+        "short_reference_id": "20170322-9F6ML2",
+        "source_amount": 10000,
+        "source_currency": "AUD",
+        "status": "PROCESSING",
+        "swift_charge_option": "SHARED",
+        "transfer_amount": 10000,
+        "transfer_currency": "AUD",
+        "transfer_date": "2017-03-24",
+        "transfer_method": "SWIFT",
+        "updated_at": "2017-03-24T18:00:02+1100"
+      }
+    ],
+    "page_after": "<string>",
+    "page_before": "<string>"
+  },
+  "transfer_create_400_examples": {
+    "declaration_required": {
+      "code": "declaration_required",
+      "details": {},
+      "message": "Complete the CN local transfer declaration process before creating the transfer.",
+      "source": "declaration_required"
+    },
+    "request_id_duplicate": {
+      "code": "request_id_duplicate",
+      "source": "request_id",
+      "message": "request_id 90459a20-d35d-3149-a998-795074c3971d has been used in the past.  Please use a different request_id for this request",
+      "details": {
+        "request_id": "90459a20-d35d-3149-a998-795074c3971d",
+        "id": "27cb219e-ec23-4aa3-8a86-89c40dad08bc"
+      }
+    },
+    "validation_failed": {
+      "code": "validation_failed",
+      "message": "validation_failed",
+      "details": {
+        "errors": [
+          {
+            "source": "beneficiary.address.postcode",
+            "code": "030"
+          },
+          {
+            "source": "beneficiary.address.street_address",
+            "code": "018",
+            "params": {
+              "length_min": 5,
+              "length_max": 200
+            }
+          },
+          {
+            "source": "beneficiary.address.street_address",
+            "code": "028"
+          }
+        ]
+      }
+    }
+  }
+}

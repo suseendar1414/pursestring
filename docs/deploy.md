@@ -271,6 +271,8 @@ Refunds in the demo always go to a built-in stand-in for PayPal's MCP server wit
 | `STRIPE_SECRET_KEY` | unset | Enables the `stripe_connect` payout rail. See [policies.md](policies.md#rail-routing) |
 | `RAZORPAYX_KEY_ID`, `RAZORPAYX_KEY_SECRET`, `RAZORPAYX_ACCOUNT_NUMBER` | unset | Enable the `razorpayx` payout rail (INR) |
 | `MODERN_TREASURY_ORGANIZATION_ID`, `MODERN_TREASURY_API_KEY`, `MODERN_TREASURY_ORIGINATING_ACCOUNT_ID` | unset | Enable the `modern_treasury` payout rail (ACH by default) |
+| `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY` | unset | Enable the `airwallex_payouts` rail (transfers to a beneficiary saved in Airwallex); with `AIRWALLEX_CARDHOLDER_ID` also the `airwallex` card rail. Sandbox unless `adapter.airwallex.environment: production` |
+| `AIRWALLEX_ACCOUNT_ID` | unset | Account to act as when one Airwallex API key covers several (`x-login-as`) |
 | `X402_PRIVATE_KEY` | unset | Wallet key that signs USDC payments for `x402_fetch`. See [x402.md](x402.md) |
 | `PURSESTRING_DEMO` | unset | `1` serves the public demo at `/demo` in HTTP mode |
 | `DEMO_PAYEE_EMAIL` | `vendor@pdfocr.example` | Who receives the demo's sandbox payouts |

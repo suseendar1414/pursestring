@@ -54,7 +54,7 @@ notifications:
   # discord_webhook_url: https://discord.com/api/webhooks/...
 
 adapter:
-  # The default rail. mock | lithic | privacy | airwallex | paypal work today; highnote | marqeta | amex | network_token | ach are planned.
+  # The default rail. mock | lithic | privacy | airwallex | airwallex_payouts | paypal | stripe_connect | razorpayx | modern_treasury work today; highnote | marqeta | amex | network_token | ach are planned.
   # LITHIC_API_KEY (or else PAYPAL_CLIENT_ID) in the env switches the default to that rail automatically.
   type: mock
   lithic:
@@ -62,6 +62,8 @@ adapter:
   airwallex:
     environment: sandbox          # sandbox is Airwallex's demo environment
     # cardholder_id: ...          # or AIRWALLEX_CARDHOLDER_ID; agent cards are issued to this cardholder
+    # created_by: Jane Founder    # full legal name of the person requesting cards
+    # transfer_method: LOCAL      # airwallex_payouts: LOCAL | SWIFT (default: the beneficiary's first method)
   paypal:
     environment: sandbox          # api-m.sandbox.paypal.com; no real money
   stripe_connect:
@@ -72,7 +74,7 @@ adapter:
   modern_treasury:
     payment_type: ach             # ach | wire | rtp | ...
 
-# Where payout rails (paypal, stripe_connect, razorpayx, modern_treasury) send money for each vendor. The agent never picks the recipient,
+# Where payout rails (paypal, stripe_connect, razorpayx, modern_treasury, airwallex_payouts) send money for each vendor. The agent never picks the recipient,
 # so a vendor with no entry here can't be paid by payout. See docs/paypal.md.
 payees: []
 #  - vendor: pdfocr.io
@@ -85,6 +87,8 @@ payees: []
 #    razorpayx_fund_account: fa_123  # razorpayx: the vendor's fund account
 #  - vendor: acme-supplies.com
 #    modern_treasury_account: ea_id  # modern_treasury: the vendor's external account ID
+#  - vendor: sydney-printing.com.au
+#    airwallex_beneficiary: 8365ea88-2946-4877-abe1-e02a1015288d  # airwallex_payouts: a beneficiary saved in Airwallex
 
 # Run PayPal's own MCP server (@paypal/mcp) behind PurseString. Read-only tools pass through;
 # refunds, dispute acceptance and cancellations go through policy first. See docs/paypal.md.

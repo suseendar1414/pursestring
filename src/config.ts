@@ -9,6 +9,7 @@ export const RAILS = [
   "lithic",
   "privacy",
   "airwallex",
+  "airwallex_payouts",
   "paypal",
   "stripe_connect",
   "razorpayx",
@@ -44,9 +45,15 @@ const PayeeSchema = z
     razorpayx_fund_account: z.string().regex(/^fa_\w+$/, "must look like fa_...").optional(),
     /** modern_treasury rail: the vendor's external account ID (the receiving account). */
     modern_treasury_account: z.string().min(1).optional(),
+    /** airwallex_payouts rail: the ID of a beneficiary already saved in Airwallex (a UUID). */
+    airwallex_beneficiary: z
+      .string()
+      .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be an Airwallex beneficiary ID (a UUID)")
+      .optional(),
   })
-  .refine((p) => p.receiver || p.stripe_account || p.razorpayx_fund_account || p.modern_treasury_account, {
-    message: "a payee needs at least one of receiver, stripe_account, razorpayx_fund_account or modern_treasury_account",
+  .refine((p) => p.receiver || p.stripe_account || p.razorpayx_fund_account || p.modern_treasury_account || p.airwallex_beneficiary, {
+    message:
+      "a payee needs at least one of receiver, stripe_account, razorpayx_fund_account, modern_treasury_account or airwallex_beneficiary",
   });
 export type PayeeEntry = z.infer<typeof PayeeSchema>;
 
@@ -141,10 +148,22 @@ const PolicySchema = z.object({
         .default({ environment: "sandbox" }),
       airwallex: z
         .object({
-          /** "sandbox" is Airwallex's demo environment. */
+          /** "sandbox" is Airwallex's sandbox (demo) environment, where production keys can't log in. Used by both Airwallex rails. */
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
           /** The cardholder agent cards are issued to; or AIRWALLEX_CARDHOLDER_ID. */
           cardholder_id: z.string().optional(),
+          /** created_by on new cards: the full legal name of the person requesting them. */
+          created_by: z.string().min(1).optional(),
+          /** Account to act as when one scoped API key covers several (x-login-as); or AIRWALLEX_ACCOUNT_ID. */
+          account_id: z.string().optional(),
+          /** Overrides the API host, e.g. https://api.sandbox.airwallex.com. */
+          base_url: z.string().url().optional(),
+          /** x-api-version sent on every call. Defaults to the version PurseString was checked against. */
+          api_version: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          /** airwallex_payouts rail: reason on each transfer. */
+          payout_reason: z.string().min(1).optional(),
+          /** airwallex_payouts rail: LOCAL or SWIFT. Unset: the first method the beneficiary was saved with. */
+          transfer_method: z.enum(["LOCAL", "SWIFT"]).optional(),
         })
         .default({ environment: "sandbox" }),
       paypal: z
@@ -187,7 +206,7 @@ const PolicySchema = z.object({
       modern_treasury: { payment_type: "ach" },
     }),
   /**
-   * Where payout rails (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury) send money for each vendor. The agent never supplies a payee:
+   * Where payout rails (PayPal, Venmo, Stripe Connect, RazorpayX, Modern Treasury, Airwallex) send money for each vendor. The agent never supplies a payee:
    * a vendor with no entry here can't be paid by payout.
    */
   payees: z.array(PayeeSchema).default([]),
@@ -293,6 +312,7 @@ export interface Config {
     airwallexClientId?: string;
     airwallexApiKey?: string;
     airwallexCardholderId?: string;
+    airwallexAccountId?: string;
     paypalClientId?: string;
     paypalClientSecret?: string;
     stripeSecretKey?: string;
@@ -357,6 +377,7 @@ export function loadConfig(): Config {
     airwallexClientId: process.env.AIRWALLEX_CLIENT_ID || undefined,
     airwallexApiKey: process.env.AIRWALLEX_API_KEY || undefined,
     airwallexCardholderId: process.env.AIRWALLEX_CARDHOLDER_ID || policy.adapter.airwallex.cardholder_id,
+    airwallexAccountId: process.env.AIRWALLEX_ACCOUNT_ID || policy.adapter.airwallex.account_id,
     paypalClientId: process.env.PAYPAL_CLIENT_ID || undefined,
     paypalClientSecret: process.env.PAYPAL_CLIENT_SECRET || undefined,
     stripeSecretKey: process.env.STRIPE_SECRET_KEY || undefined,

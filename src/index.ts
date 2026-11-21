@@ -54,7 +54,9 @@ Environment:
   LITHIC_WEBHOOK_SECRET  Lithic ASA HMAC key; enables real-time authorization at POST /jit/lithic
   PRIVACY_API_KEY      Enables the privacy rail (Privacy.com cards, real money, route to it in policies.yaml)
   AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY, AIRWALLEX_CARDHOLDER_ID
-                       Enable the airwallex rail (Airwallex Issuing cards outside the US too; demo env by default)
+                       Enable the airwallex rail (Airwallex Issuing cards outside the US too; sandbox by default).
+                       The client ID and key alone enable airwallex_payouts (transfers to a saved beneficiary)
+  AIRWALLEX_ACCOUNT_ID Account to act as when one Airwallex API key covers several (x-login-as)
   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET
                        Enable the paypal rail (pays vendors' PayPal or Venmo accounts on file; sandbox by default)
   STRIPE_SECRET_KEY    Enables the stripe_connect rail (transfers to a vendor's connected account; test keys only by default)

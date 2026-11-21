@@ -14,6 +14,8 @@
 
 - **x402 pay-per-request** (#38). A new `x402_fetch` tool pays for HTTP resources that answer `402 Payment Required`, in USDC. Each payment is a normal purchase intent and goes through every policy rule. Off by default, testnet by default, and not yet run against a live facilitator.
 - **Stripe Connect, RazorpayX and Modern Treasury payouts** (#38). Pay a vendor account pinned in `policies.yaml`; the agent never supplies account details. Stub-tested only.
+- **Airwallex payouts** (#39). A new `airwallex_payouts` rail pays a beneficiary already saved in Airwallex, pinned per vendor in `policies.yaml` (`airwallex_beneficiary`). Built from Airwallex's own open-source API spec, SDK and AI tooling, but stub-tested only: not yet run against a live Airwallex account. The default transfer `reason` and the 18-character bank `reference` are unverified for some countries; both can be changed in `policies.yaml`.
+- **Airwallex cards, hardened** (#39). The card rail now pins the Airwallex API version, waits for a new card to become active before reading its details, and recovers the card if a retried create is refused. Still stub-tested only.
 - **PayPal and Venmo payouts** (#27). Pay a vendor's PayPal account on file. Tested on the PayPal sandbox.
 - **Guardrails for PayPal's own MCP server** (#27). Read-only PayPal tools pass through; refunds, dispute acceptance and cancellations need policy or a human.
 
@@ -34,6 +36,7 @@
 
 - The velocity limit and loop detection are on by default. An agent that makes more than 20 purchase requests in 10 minutes, or repeats the same purchase 5 times, will now be denied or halted. Raise `hard_limits.velocity.max_intents` or `kill_switch.loop_detection.max_similar`, or set `enabled: false`, if your agents legitimately buy in bursts.
 - Card charges must now match the approved merchant (`require_merchant_match: true`). Set it to `false` for merchants whose card descriptor doesn't include their name.
+- Airwallex card users: set `adapter.airwallex.created_by` to the full legal name of the person requesting cards (Airwallex asks for this; it defaults to "PurseString").
 
 ## 0.1.0 (2026-10-27)
 
