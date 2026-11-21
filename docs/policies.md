@@ -13,6 +13,7 @@ Every rule is evaluated for every intent and recorded in the audit log, pass or 
 | Rule | Fails when | Effect |
 |---|---|---|
 | `hard_limits.max_amount` | amount is over the hard cap | deny |
+| `hard_limits.velocity` | the agent already submitted `max_intents` new intents in the last `window_minutes`, any vendor | deny |
 | `vendors.blocklist` | vendor matches the blocklist | deny |
 | `currency` | intent currency differs from the policy currency | deny |
 | `intent.task_goal` | goal is shorter than `intent.min_goal_length` | human |
@@ -48,6 +49,10 @@ require_approval:
 hard_limits:
   max_amount: 1000
   per_agent_daily_budget: 200     # sum of cards issued to one agent_id since 00:00 UTC
+  velocity:                       # how many new intents one agent may submit, across all vendors (see below)
+    enabled: true
+    max_intents: 20
+    window_minutes: 10            # rolling window
 
 intent:
   require_alternatives: true
@@ -151,6 +156,25 @@ payees:
 ## x402
 
 `x402_fetch` pays for HTTP resources that answer `402 Payment Required`, in USDC. Each payment becomes a purchase intent for the URL's host and goes through every rule on this page. Off by default; see [x402.md](x402.md).
+
+## Velocity limit
+
+`hard_limits.velocity` caps how many new spend intents one agent can submit in a rolling window, whatever the vendor, rail or amount. It's there for the agent that loops across many merchants: each purchase is small and passes every other rule, but twenty of them a minute can use up the daily budget before anyone reads the Slack alert.
+
+```yaml
+hard_limits:
+  velocity:
+    enabled: true
+    max_intents: 20               # the 21st new intent in the window is denied
+    window_minutes: 10
+```
+
+- **What counts:** every new intent the agent submitted inside the window, approved, pending or denied, on any vendor, rail, x402 payment or governed PayPal tool call. A retry with the same idempotency key returns the original intent and doesn't count. Intents the velocity limit itself refused don't count either, so the window drains as old intents age out.
+- **What happens:** the intent is denied with rule `hard_limits.velocity`, and the reason tells the agent how long the window is. It doesn't halt the agent or freeze anything already approved; that's the kill switch's job.
+- **Atomic:** the count is read and the new intent written under the same lock as the budget check, so parallel requests, even from separate server processes on one state directory, can't all slip under the limit.
+- `check_policy_compliance` shows whether the next intent would pass, without using a slot.
+
+Loop detection (below) is the narrower check: the same vendor at about the same amount, and it halts the agent. The velocity limit is the wide net for everything else.
 
 ## Kill switch and loop detection
 
