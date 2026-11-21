@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { exponent, formatMinor, isWholeMinor, toMajor, toMinor } from "./money.js";
 import { cardCostMinor, holdStatus, openHoldMinor, usedMinor } from "./holds.js";
 import { idempotencyKey, spentToday, Store } from "./store.js";
+import { velocityRule } from "./velocity.js";
 import {
   atomicToCents,
   paymentHeader,
@@ -296,12 +297,14 @@ export class Governance {
   checkCompliance(intent: PurchaseIntent): { evaluation: PolicyEvaluation; idempotency_key: string; existing?: IntentRecord } {
     checkAmount(intent);
     const key = idempotencyKey(intent);
-    const out = this.store.transact((intents, now) => ({
-      evaluation: evaluate(this.config.policy, intent, {
+    const out = this.store.transact((intents, now) => {
+      let evaluation = evaluate(this.config.policy, intent, {
         spentTodayByAgent: spentToday(intents, intent.agent_id, now, this.config.policy.currency),
-      }),
-      existing: this.findRecent(intents, key, now),
-    }));
+      });
+      const velocity = velocityRule(this.config.policy, intents, intent.agent_id, now);
+      if (velocity) evaluation = withRule(evaluation, velocity);
+      return { evaluation, existing: this.findRecent(intents, key, now) };
+    });
     this.store.audit("policy_checked", {
       idempotency_key: key,
       intent,
@@ -337,6 +340,11 @@ export class Governance {
       let evaluation = this.evaluateRecord(intent, action, intents, now);
       const halt = activeHalt(halts, intent.agent_id);
       const ld = this.config.policy.kill_switch.loop_detection;
+      if (!halt) {
+        // Counted in the same transaction as the write, like the budget, so parallel requests can't all slip under it.
+        const velocity = velocityRule(this.config.policy, intents, intent.agent_id, now);
+        if (velocity) evaluation = withRule(evaluation, velocity);
+      }
       if (halt) {
         evaluation = withRule(evaluation, {
           rule: "kill_switch",
