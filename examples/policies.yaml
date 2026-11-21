@@ -29,6 +29,10 @@ require_approval:
 hard_limits:
   max_amount: 1000                # refused outright, nobody can approve it
   per_agent_daily_budget: 200     # past this, every spend needs a human
+  velocity:                       # stops an agent looping across many merchants
+    enabled: true
+    max_intents: 20               # the 21st new intent from one agent in 10 minutes is denied
+    window_minutes: 10            # rolling; retries of the same intent don't count
 
 intent:
   require_alternatives: true      # agent must say what free options it tried first

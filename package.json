@@ -1,6 +1,6 @@
 {
   "name": "pursestring",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "mcpName": "io.github.suseendar1414/pursestring",
   "description": "Universal, open-source financial interface for AI agents (MCP), with consistent governance across providers: spending policy, human approvals, idempotency and an audit log before any money moves.",
   "main": "dist/index.js",

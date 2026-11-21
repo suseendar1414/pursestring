@@ -90,8 +90,24 @@ const PolicySchema = z.object({
       max_amount: z.number().positive().default(1000),
       /** Total issued per agent per UTC day before every further spend needs a human. */
       per_agent_daily_budget: z.number().positive().default(200),
+      /**
+       * How many new spend intents one agent may submit in a rolling window, across every vendor and rail. Past it,
+       * new intents are denied until older ones age out, so a looping agent can't burn the daily budget before a
+       * human reads the alert. Retries of the same intent (same idempotency key) don't count.
+       */
+      velocity: z
+        .object({
+          enabled: z.boolean().default(true),
+          max_intents: z.number().int().positive().default(20),
+          window_minutes: z.number().positive().default(10),
+        })
+        .default({ enabled: true, max_intents: 20, window_minutes: 10 }),
     })
-    .default({ max_amount: 1000, per_agent_daily_budget: 200 }),
+    .default({
+      max_amount: 1000,
+      per_agent_daily_budget: 200,
+      velocity: { enabled: true, max_intents: 20, window_minutes: 10 },
+    }),
   intent: z
     .object({
       /** Require at least one alternative before paying. Missing alternatives route to a human. */
