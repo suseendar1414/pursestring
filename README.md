@@ -38,7 +38,7 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
 **PurseString** is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives agents one interface to financial services and enforces your spending rules before anything is executed. The agent declares *what* it wants to pay for, *why*, and *what it tried first*. PurseString checks that against your `policies.yaml`, blocks duplicates, pauses risky spend for a human in Slack or Discord, records the decision, and only then executes it on the right provider.
 
 > [!WARNING]
-> **v0.1 alpha.** PurseString issues real Lithic cards: use a production Lithic key and set `adapter.lithic.environment: production`. It's early software, so start with low limits. Tested end to end on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
+> **v0.2.0 alpha** ([changelog](CHANGELOG.md)). PurseString issues real Lithic cards: use a production Lithic key and set `adapter.lithic.environment: production`. It's early software, so start with low limits. Tested end to end on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
 
 <p align="center">
   <img src="assets/demo.gif" width="760" alt="Screen recording in Claude Desktop: Claude asks to use PurseString's tools, gets a $12 single-use Lithic sandbox card ending in 1084, then retries the same purchase after a hung checkout and PurseString returns the same intent and card with deduplicated: true.">
@@ -214,7 +214,7 @@ PurseString is open core. Everything in this repository is free and stays Apache
 | Self-hosted MCP server, YAML policies | Audit dashboard with visual decision trees for every charge |
 | Local JSON decision log | One-click Slack / Teams approvals |
 | Slack / Discord approval pause | Role-based access: policies per department, project or agent squad |
-| Sandbox card adapters (Lithic, Stripe Issuing) | Enterprise rails: Amex, bank ACH / wires, ERP purchase orders |
+| Card adapters (Lithic, Privacy.com, Airwallex) | Enterprise rails: Amex, bank ACH / wires, ERP purchase orders |
 
 The full product vision is in **[docs/VISION.md](docs/VISION.md)**.
 
