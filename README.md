@@ -1,10 +1,9 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="PurseString: the open-source financial interface for AI agents" width="100%">
+  <img src="assets/banner.svg" alt="PurseString: open-source spending guardrails for AI agents" width="100%">
 </p>
 
 <p align="center">
-  <b>A universal, open-source financial interface that lets AI agents use financial services safely,<br>with the same governance across every provider.</b><br>
-  One MCP server. Your spending rules enforced before any money moves.
+  <b>PurseString is an open-source MCP server that gives AI agents spending guardrails:<br>your rules, and a human when needed, are checked before a card is issued or money moves.</b>
 </p>
 
 <p align="center">
@@ -35,7 +34,7 @@ AI agents can now pay for things: API credits, SaaS seats, datasets, cloud resou
 - 📆 A $15 "trial" fits under the $50 cap and **auto-renews forever**.
 - 🤷 Finance asks "what was this charge?" and **nobody can say why the agent bought it**.
 
-**PurseString** is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives agents one interface to financial services and enforces your spending rules before anything is executed. The agent declares *what* it wants to pay for, *why*, and *what it tried first*. PurseString checks that against your `policies.yaml`, blocks duplicates, pauses risky spend for a human in Slack or Discord, records the decision, and only then executes it on the right provider.
+**PurseString** is an open-source, self-hosted [MCP](https://modelcontextprotocol.io) server that gives AI agents spending guardrails. The agent declares *what* it wants to pay for, *why*, and *what it tried first*. PurseString checks that against your `policies.yaml`, blocks duplicates, pauses risky spend for a human in Slack or Discord, records the decision, and only then executes it on the right provider.
 
 > [!WARNING]
 > **v0.2.0 alpha** ([changelog](CHANGELOG.md)). PurseString issues real Lithic cards: use a production Lithic key and set `adapter.lithic.environment: production`. It's early software, so start with low limits. Tested end to end on the Lithic sandbox: card issue, duplicate-request replay, auto-close after 10 minutes, and real-time charge approval (answered in under 3 ms; [try it yourself](docs/real-time-approval.md)). Tell us what breaks in [issues](https://github.com/suseendar1414/pursestring/issues).
