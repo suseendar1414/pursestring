@@ -2,7 +2,7 @@
   "name": "pursestring",
   "version": "0.2.0",
   "mcpName": "io.github.suseendar1414/pursestring",
-  "description": "Universal, open-source financial interface for AI agents (MCP), with consistent governance across providers: spending policy, human approvals, idempotency and an audit log before any money moves.",
+  "description": "PurseString is an open-source MCP server that gives AI agents spending guardrails: your rules, and a human when needed, are checked before a card is issued or money moves.",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
