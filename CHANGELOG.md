@@ -24,6 +24,10 @@
 - Concurrency tests: parallel card requests, the same card requested at once, and separate processes racing on one state file.
 - Webhook tests: the same delivery many times at once, newer updates arriving before older ones, events out of order inside one update, captures arriving before their authorization, ASA retries, parallel refunds, and stale or tampered signatures.
 
+### Measure it
+
+- **Attack benchmark.** `npm run bench` runs scripted prompt-injected refunds, split payouts, swapped payees, double retries, loops and over-budget agents, with and without PurseString, in mock mode, and counts the dollars that moved. Results and method: [docs/attack-benchmark.md](docs/attack-benchmark.md). `test/bench.test.ts` keeps the published numbers in sync with the code.
+
 ### Upgrading
 
 - Intents approved before this version have no stored evidence. They are re-checked against the current policy only.

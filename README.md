@@ -22,6 +22,7 @@
   <a href="docs/deploy.md">Deploy</a> ·
   <a href="docs/policies.md">Policies</a> ·
   <a href="docs/how-it-works.md">How it works</a> ·
+  <a href="docs/attack-benchmark.md">Attack benchmark</a> ·
   <a href="docs/VISION.md">Vision</a> ·
   <a href="https://discord.gg/qBqgx2GB86">Discord</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
@@ -78,6 +79,7 @@ Setup in the PayPal sandbox takes about 5 minutes: see **[docs/paypal.md](docs/p
 | 🧠 **Intent before money** | The agent must state the goal and the free alternatives it tried. A vague goal or no alternatives means a human looks first. |
 | 📼 **A black box recorder for every decision** | Goal, alternatives, the agent's reasoning, every rule and how it ruled, who approved, and what was executed, as append-only JSON lines. Card numbers are never written to disk. |
 | 🔀 **One policy, routed per provider** | `routes` in `policies.yaml` picks the provider per purchase by amount, vendor or recurrence, so the same rules apply wherever the money moves. |
+| 📏 **Measured, not claimed** | An [attack benchmark](docs/attack-benchmark.md) runs prompt-injected refunds, split payouts, swapped payees, retries, loops and over-budget agents with and without PurseString (mock mode, `npm run bench`). With the default policy, unwanted spend fell from $6,784.71 to $528.94, and money reaching an attacker fell from $2,198.00 to $192.00. |
 | 🏠 **Self-hosted, Apache 2.0** | Runs on your laptop or in your VPC. Your financial credentials never leave your infrastructure. |
 
 ## 🤝 Use it with your rail, not instead of it
