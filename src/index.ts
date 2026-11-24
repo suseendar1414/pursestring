@@ -8,6 +8,7 @@ import { Rails } from "./adapters/index.js";
 import { loadConfig, policyHash } from "./config.js";
 import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
+import { agentKeysFor } from "./identity.js";
 import { formatMoney } from "./money.js";
 import { WebhookNotifier } from "./notify.js";
 import { revokeAllOAuth } from "./oauth.js";
@@ -67,6 +68,7 @@ Environment:
   X402_PRIVATE_KEY     Wallet key that signs x402 USDC payments (with x402.enabled in policies.yaml)
   PURSESTRING_DEMO=1      In HTTP mode, serve the public demo at /demo (its own throwaway state; payouts hit the
                           PayPal sandbox when PAYPAL_CLIENT_ID / SECRET are set). DEMO_PAYEE_EMAIL sets the payee.
+  PURSESTRING_AGENT_KEY   Agent key for this stdio server (agents.keys in policies.yaml): every call runs as that agent
   PURSESTRING_TOKEN       Bearer token required on /mcp in HTTP mode
   PURSESTRING_AUDIT_KEY   Secret that turns the decision log's hash chain into an HMAC chain, so someone who can
                           edit the file can't recompute the hashes. Needed again to verify.
@@ -139,6 +141,10 @@ async function main() {
               : "Set SLACK_WEBHOOK_URL or DISCORD_WEBHOOK_URL to turn them on."),
         );
       }
+      const missingKeys = agentKeysFor(config).missing;
+      if (missingKeys.length) {
+        console.error(`[pursestring] warning: no key in the environment for ${missingKeys.join(", ")} (agents.keys key_env); calls as them will be refused.`);
+      }
       const upstream = await startPayPalTools(config);
       if (values.http || process.env.PURSESTRING_TRANSPORT === "http") {
         const demo = process.env.PURSESTRING_DEMO === "1" ? await new Demo(config.env).reset() : undefined;
@@ -148,7 +154,15 @@ async function main() {
         });
         return;
       }
-      const server = createMcpServer(gov, upstream);
+      // stdio: one process per agent, so the key in its environment names the agent for every call.
+      const keys = agentKeysFor(config);
+      const agentKey = process.env.PURSESTRING_AGENT_KEY;
+      const agent = keys.resolve(agentKey);
+      if (agentKey && !agent) throw new Error("PURSESTRING_AGENT_KEY doesn't match any key in agents.keys of policies.yaml.");
+      if (keys.required && !agent) {
+        console.error("[pursestring] warning: agents.require_key is on but PURSESTRING_AGENT_KEY is not set, so every spend call will be refused.");
+      }
+      const server = createMcpServer(gov, upstream, { agent_id: agent });
       await server.connect(new StdioServerTransport());
       console.error(
         `[pursestring] stdio server ready (rail: ${gov.rails.default}, policy: ${config.policyPath ?? "built-in defaults"}, home: ${config.homeDir})`,

@@ -93,6 +93,10 @@ kill_switch:
     max_similar: 5
     amount_tolerance_percent: 10
 
+agents:                           # verified agent identity (see below); off when no keys are listed
+  # require_key: true             # refuse callers without a key (default: on once keys are listed)
+  keys: []                        # [{agent_id, key_sha256 | key_env}]
+
 routes: []                        # see "Rail routing" below
 
 cards:
@@ -214,6 +218,36 @@ kill_switch:
 ```
 
 "Near-identical" means the same agent, the same vendor domain, the same currency and amounts within the tolerance, compared in whole minor units. The intent that trips it is denied, the halt is written to the audit log with the IDs of the intents that looked like a loop, and Slack or Discord gets the resume command. Intents from before the last resume don't count, so resuming doesn't trip it again straight away.
+
+## Verified agent identity
+
+Without keys, `agent_id` is whatever the agent writes in the tool call. An agent that is halted, over its daily budget or at its velocity limit could pass another name and carry on. List your agents with a key and each `agent_id` can only be used by whoever holds its key:
+
+```yaml
+agents:
+  # require_key: true             # default once keys are listed: callers without a key are refused
+  keys:
+    - agent_id: invoice-bot
+      key_sha256: "<64 hex characters>"   # printf %s "$KEY" | sha256sum
+    - agent_id: support-bot
+      key_env: SUPPORT_BOT_KEY    # or read the key itself from this environment variable
+```
+
+Make a key with `openssl rand -hex 32`. `key_sha256` keeps the secret out of `policies.yaml`; `key_env` keeps it in the server's environment. A `key_env` whose variable is unset still reserves the id, so nobody can use it until the key is set.
+
+**How an agent presents its key.** The key goes in the MCP client's config, not in the model's context, so a prompt injection can't read or change it.
+
+- **stdio** (Claude Desktop, Cursor): set `PURSESTRING_AGENT_KEY` in the server's `env` block. That process then acts as that one agent. A key that matches nothing stops the server at startup.
+- **HTTP** (`/mcp`): send `X-PurseString-Agent-Key: <key>`, or send the key as `Authorization: Bearer <key>`. An agent key also counts as signed in when `PURSESTRING_TOKEN` is set. A wrong key in the header gets `401`.
+
+**What's checked.** On a verified connection:
+
+- `submit_purchase_intent`, `check_policy_compliance`, `x402_fetch` and governed PayPal tools must name the verified `agent_id`. Any other id is refused with `agent_identity_mismatch`, so a halted or over-budget agent can't spend under another name. Budgets, velocity limits, loop detection and the kill switch all count against the id the key proved.
+- `request_ephemeral_card`, `send_payment`, `get_intent_status` and repeats with an `intent_id` only work on that agent's own intents. Another agent's intent is refused without saying whose it is.
+
+Callers without a key are refused with `agent_key_required` while `require_key` is on. Set `require_key: false` to roll keys out one agent at a time: unkeyed callers keep working under ids that aren't listed, but can't use a listed id or touch a listed agent's intents. Every refusal is written to the decision log as `agent_identity_refused`, with the claimed and verified ids.
+
+Not covered: OAuth sign-ins (ChatGPT, claude.ai) can't send an agent key yet, so they run as unkeyed callers. Admin actions (`pursestring approve`, `halt`, the HTTP admin API) are a human's and use their own tokens.
 
 ## Vendor matching
 

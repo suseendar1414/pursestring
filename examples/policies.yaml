@@ -130,6 +130,14 @@ kill_switch:
     max_similar: 5                # the 5th near-identical intent in 10 minutes halts the agent
     amount_tolerance_percent: 10
 
+# Verified agent identity: without keys, agent_id is whatever the agent says. List agents with a key and each id
+# can only be used with its key (PURSESTRING_AGENT_KEY over stdio, X-PurseString-Agent-Key over HTTP).
+# Callers without a key are then refused unless require_key: false. See docs/policies.md.
+agents:
+  keys: []
+  #  - agent_id: invoice-bot
+  #    key_env: INVOICE_BOT_KEY      # or key_sha256: <printf %s "$KEY" | sha256sum>
+
 # Pay for HTTP APIs that charge per request with 402 Payment Required (x402), in USDC from the wallet in
 # X402_PRIVATE_KEY. Each payment is a purchase intent under this same policy. See docs/x402.md.
 x402:

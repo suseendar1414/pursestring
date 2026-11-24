@@ -258,6 +258,7 @@ Refunds in the demo always go to a built-in stand-in for PayPal's MCP server wit
 | `PURSESTRING_TRANSPORT` | `stdio` (`http` in Docker) | `http` runs the HTTP server without `--http` |
 | `HOST`, `PORT` | `127.0.0.1`, `8787` | HTTP bind address |
 | `PURSESTRING_TOKEN` | unset | Bearer token required on `/mcp` |
+| `PURSESTRING_AGENT_KEY` | unset | stdio only: the agent key this process runs as (`agents.keys` in policies.yaml). Over HTTP, agents send `X-PurseString-Agent-Key` instead |
 | `PURSESTRING_ADMIN_TOKEN` | unset | Enables the approval API; also the password on the OAuth consent page |
 | `PURSESTRING_PUBLIC_URL` | unset | Public https address; turns on OAuth sign-in for ChatGPT and claude.ai. See [chatgpt.md](chatgpt.md) |
 | `SLACK_WEBHOOK_URL` | unset | Slack approval requests |
