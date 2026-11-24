@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Governance, GovernanceError } from "./governance.js";
+import { agentKeysFor, CallerGuard } from "./identity.js";
 import { formatMoney } from "./money.js";
 import type { Upstream } from "./paypal-mcp.js";
 import { isGovernedTool } from "./policy.js";
@@ -121,7 +122,7 @@ function toZod(schema: Record<string, unknown>) {
  * (refunds, accepting disputes, cancellations) take agent_id and reason too, and run only when policy or a human
  * allows them.
  */
-function registerPayPalTools(server: McpServer, gov: Governance, upstream: Upstream, taken: Set<string>) {
+function registerPayPalTools(server: McpServer, gov: Governance, upstream: Upstream, taken: Set<string>, guard: CallerGuard) {
   for (const tool of upstream.tools) {
     if (taken.has(tool.name)) continue;
     const base = toZod(tool.inputSchema);
@@ -157,7 +158,9 @@ function registerPayPalTools(server: McpServer, gov: Governance, upstream: Upstr
           intent_id?: string;
         };
         try {
-          const { record, result, replayed } = await gov.governToolCall(tool.name, args, { agent_id, reason, intent_id }, (a) =>
+          const agent = guard.agentFor(agent_id, tool.name);
+          if (intent_id) guard.checkOwner(gov.store.get(intent_id), tool.name);
+          const { record, result, replayed } = await gov.governToolCall(tool.name, args, { agent_id: agent, reason, intent_id }, (a) =>
             upstream.call(tool.name, a),
           );
           const note = {
@@ -197,7 +200,22 @@ function registerPayPalTools(server: McpServer, gov: Governance, upstream: Upstr
   }
 }
 
-export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer {
+export interface CallerIdentity {
+  /** The agent_id this connection proved with its agent key (see agents.keys in policies.yaml). */
+  agent_id?: string;
+}
+
+/**
+ * One MCP server for one connection. `caller.agent_id` is the agent the connection's key proved, if any: tool calls
+ * must then use that id, and can only touch that agent's intents.
+ */
+export function createMcpServer(gov: Governance, upstream?: Upstream, caller: CallerIdentity = {}): McpServer {
+  const guard = new CallerGuard(agentKeysFor(gov.config), caller.agent_id, (e, d) => gov.store.audit(e, d));
+  /** Parse an intent and swap in the verified agent_id. */
+  const verifiedIntent = (args: unknown, tool: string) => {
+    const intent = PurchaseIntentSchema.parse(args);
+    return { ...intent, agent_id: guard.agentFor(intent.agent_id, tool) };
+  };
   const server = new McpServer(
     { name: "pursestring", version: VERSION },
     {
@@ -221,7 +239,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     },
     async (args) => {
       try {
-        const intent = PurchaseIntentSchema.parse(args);
+        const intent = verifiedIntent(args, "check_policy_compliance");
         const { evaluation, idempotency_key, existing } = gov.checkCompliance(intent);
         return ok({
           decision: evaluation.decision,
@@ -249,7 +267,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     },
     async (args) => {
       try {
-        const intent = PurchaseIntentSchema.parse(args);
+        const intent = verifiedIntent(args, "submit_purchase_intent");
         const { record, deduplicated } = await gov.submitIntent(intent);
         return ok({ ...view(gov, record), deduplicated });
       } catch (err) {
@@ -270,6 +288,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     },
     async ({ intent_id }) => {
       try {
+        guard.checkOwner(gov.store.get(intent_id), "request_ephemeral_card");
         const { card, record, replayed } = await gov.requestCard(intent_id);
         return ok({
           intent_id,
@@ -320,6 +339,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     },
     async ({ intent_id }) => {
       try {
+        guard.checkOwner(gov.store.get(intent_id), "send_payment");
         const { payment, record, replayed } = await gov.sendPayment(intent_id);
         return ok({
           intent_id,
@@ -359,6 +379,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
     },
     async ({ intent_id, wait_seconds }) => {
       try {
+        guard.checkOwner(gov.store.get(intent_id), "get_intent_status");
         return ok(view(gov, await gov.getStatus(intent_id, wait_seconds)));
       } catch (err) {
         return fail(err);
@@ -393,7 +414,9 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
       },
       async (args) => {
         try {
-          const out = await gov.x402Fetch(args);
+          const agent_id = guard.agentFor(args.agent_id, "x402_fetch");
+          if (args.intent_id) guard.checkOwner(gov.store.get(args.intent_id), "x402_fetch");
+          const out = await gov.x402Fetch({ ...args, agent_id });
           return ok({
             paid: out.paid,
             replayed: out.replayed,
@@ -426,6 +449,7 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
       gov,
       upstream,
       new Set(["check_policy_compliance", "submit_purchase_intent", "request_ephemeral_card", "send_payment", "get_intent_status", "x402_fetch"]),
+      guard,
     );
   }
 

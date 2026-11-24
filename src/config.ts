@@ -280,6 +280,35 @@ const PolicySchema = z.object({
       max_response_bytes: z.number().int().positive().default(100_000),
     })
     .default({ enabled: false, networks: ["eip155:84532"], pay_to: [], max_timeout_seconds: 300, max_response_bytes: 100_000 }),
+  /**
+   * Verified agent identity. Without it, agent_id is whatever the agent says it is. List an agent here with a key and
+   * that agent_id can only be used by a caller holding the key: over stdio from PURSESTRING_AGENT_KEY, over HTTP from
+   * the X-PurseString-Agent-Key header (or as the bearer token). Budgets, velocity limits and the kill switch then key
+   * on an id the agent proved, not one it typed.
+   */
+  agents: z
+    .object({
+      /**
+       * Refuse every caller without a valid key. Left unset, it's on whenever keys are listed. Set false to let unkeyed
+       * agents keep working under ids that aren't listed (listed ids still need their key).
+       */
+      require_key: z.boolean().optional(),
+      keys: z
+        .array(
+          z
+            .object({
+              agent_id: z.string().trim().min(1),
+              /** SHA-256 of the key, in hex, so policies.yaml holds no secret: `printf %s "$KEY" | sha256sum`. */
+              key_sha256: z.string().regex(/^[0-9a-fA-F]{64}$/, "must be 64 hex characters (the SHA-256 of the key)").optional(),
+              /** Or the name of an environment variable holding the key itself. */
+              key_env: z.string().min(1).optional(),
+            })
+            .refine((k) => Boolean(k.key_sha256) !== Boolean(k.key_env), { message: "give exactly one of key_sha256 or key_env" }),
+        )
+        .default([])
+        .refine((ks) => new Set(ks.map((k) => k.agent_id)).size === ks.length, { message: "each agent_id may be listed once" }),
+    })
+    .default({ keys: [] }),
   /** Pick a rail per purchase. First matching route wins; otherwise adapter.type. */
   routes: z.array(RouteSchema).default([]),
   cards: z

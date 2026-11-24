@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Verified agent identity** (opt-in). List agents under `agents.keys` in `policies.yaml` and each `agent_id` needs its key: `PURSESTRING_AGENT_KEY` over stdio, `X-PurseString-Agent-Key` or the bearer token over HTTP. A verified agent can't spend under another id or touch another agent's intents, so budgets, velocity limits and the kill switch key on an id it proved. Nothing changes when no keys are listed.
+
 ## 0.2.0 (2026-11-21)
 
 ⚠️ Still alpha. Start with low limits. Rails marked "stub-tested" have only been run against recorded or stubbed API responses, never a live account.

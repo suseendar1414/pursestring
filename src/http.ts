@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { verifySlackSignature } from "./approvals.js";
 import { Governance, GovernanceError, type AuthorizationCode, type SettlementInput } from "./governance.js";
+import { AGENT_KEY_HEADER, agentKeysFor } from "./identity.js";
 import { formatMoney, toMajor } from "./money.js";
 import { OAuthServer } from "./oauth.js";
 import { verifyStandardWebhook } from "./webhooks.js";
@@ -144,6 +145,8 @@ function bearerOk(req: IncomingMessage, token: string | undefined): boolean {
  *   POST /slack/actions                Slack Approve/Deny buttons  (SLACK_SIGNING_SECRET signature)
  *   POST /jit/authorize                generic real-time authorization for other rails (admin token)
  *   /.well-known/*, /oauth/*           OAuth sign-in for remote MCP clients (when PURSESTRING_PUBLIC_URL is set)
+ * With agents.keys in policies.yaml, a caller proves its agent_id with X-PurseString-Agent-Key: <key>, or by sending
+ * the agent key as the bearer token, which also counts as signed in.
  * Set PURSESTRING_TOKEN to require a bearer token on /mcp, and PURSESTRING_ADMIN_TOKEN for the approval API.
  * Set PURSESTRING_PUBLIC_URL (the public https address) to let OAuth clients such as ChatGPT sign in; /mcp then
  * always requires a token, either PURSESTRING_TOKEN or an OAuth access token.
@@ -166,6 +169,7 @@ export function startHttp(
     oauth = new OAuthServer(publicUrl, adminToken, gov.config.homeDir);
   }
 
+  const keys = agentKeysFor(gov.config);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
@@ -176,14 +180,19 @@ export function startHttp(
       if (oauth && (await oauth.handle(req, res, url))) return;
 
       if (url.pathname === "/mcp") {
-        const authed = bearerOk(req, mcpToken) || (oauth?.verifyAccessToken(bearerOf(req)) ?? false);
+        // An agent key (agents.keys in policies.yaml) both signs the caller in and proves which agent it is.
+        const header = req.headers[AGENT_KEY_HEADER];
+        const headerKey = Array.isArray(header) ? header[0] : header;
+        const agent = headerKey ? keys.resolve(headerKey) : keys.resolve(bearerOf(req) || undefined);
+        if (headerKey && !agent) return send(res, 401, { error: "unknown agent key" });
+        const authed = Boolean(agent) || bearerOk(req, mcpToken) || (oauth?.verifyAccessToken(bearerOf(req)) ?? false);
         if ((mcpToken || oauth) && !authed) {
           res.writeHead(401, { "Content-Type": "application/json", ...(oauth ? { "WWW-Authenticate": oauth.challenge } : {}) });
           return void res.end(JSON.stringify({ error: "unauthorized" }));
         }
         if (req.method !== "POST") return send(res, 405, { error: "method not allowed; stateless server accepts POST only" });
         const body = await readJson(req);
-        const mcp = createMcpServer(gov, opts.upstream);
+        const mcp = createMcpServer(gov, opts.upstream, { agent_id: agent });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
         res.on("close", () => {
           void transport.close();
@@ -395,7 +404,7 @@ export function startHttp(
     console.error(`[pursestring] HTTP MCP server on http://${host}:${port}/mcp (rail: ${gov.rails.default})`);
     if (opts.demo) console.error(`[pursestring] public demo on http://${host}:${port}/demo`);
     if (oauth) console.error(`[pursestring] OAuth sign-in on: add ${oauth.resource} as a connector in ChatGPT or Claude`);
-    else if (!mcpToken) console.error("[pursestring] warning: PURSESTRING_TOKEN is not set, /mcp is unauthenticated. Keep it on a private network.");
+    else if (!mcpToken && !keys.required) console.error("[pursestring] warning: PURSESTRING_TOKEN is not set, /mcp is unauthenticated. Keep it on a private network.");
   });
   return server;
 }
