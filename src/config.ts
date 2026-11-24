@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -345,6 +346,28 @@ function dropNulls(v: unknown): unknown {
     return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, dropNulls(x)]));
   }
   return v;
+}
+
+/** Deterministic JSON: object keys sorted and undefined dropped, so equal values always hash the same. */
+export function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v)
+      .sort()
+      .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+      .map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * Fingerprint of the policy in force: SHA-256 over the parsed policy (defaults filled in, environment overrides such as
+ * PURSESTRING_ADAPTER applied), so comments and key order in policies.yaml don't change it but any rule change does.
+ * Stamped on every audit entry and every intent, so a decision can be traced to the exact rules that made it.
+ */
+export function policyHash(policy: Policy): string {
+  return `sha256:${createHash("sha256").update(stableJson(policy)).digest("hex")}`;
 }
 
 export function parsePolicy(raw: unknown): Policy {

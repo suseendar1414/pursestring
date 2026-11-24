@@ -296,7 +296,7 @@ export function startHttp(
         const allowed = gov.config.policy.approvals.slack_approvers;
         res.writeHead(200).end();
         if (allowed.length && !allowed.includes(userId)) {
-          gov.store.audit("slack_decision_refused", { intent_id: action.value, by: who, reason: "not in approvals.slack_approvers" });
+          gov.audit("slack_decision_refused", { intent_id: action.value, by: who, reason: "not in approvals.slack_approvers" });
           return slackRespond(payload.response_url, {
             response_type: "ephemeral",
             replace_original: false,

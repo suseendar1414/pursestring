@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Rails } from "./adapters/index.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, policyHash } from "./config.js";
 import { Governance, GovernanceError } from "./governance.js";
 import { startHttp } from "./http.js";
 import { formatMoney } from "./money.js";
@@ -41,7 +41,7 @@ Usage:
   pursestring simulate-charge <intent_id> <amount> [--merchant "PDFOCR.IO"]
                                 Pretend the merchant charged the intent's card and show the
                                 real-time authorization decision (works with the mock rail)
-  pursestring policy               Print the active policy and where it was loaded from
+  pursestring policy               Print the active policy, where it was loaded from, and its policy_hash
   pursestring oauth revoke         Sign out every app connected with OAuth (ChatGPT, claude.ai)
 
 Environment:
@@ -238,6 +238,7 @@ async function main() {
     case "policy": {
       const { config } = build();
       console.log(`# loaded from: ${config.policyPath ?? "built-in defaults"}  (rail: ${config.policy.adapter.type})`);
+      console.log(`# policy_hash: ${policyHash(config.policy)}  (matches policy_hash on decision-log entries made under it)`);
       console.log(JSON.stringify(config.policy, null, 2));
       return;
     }
