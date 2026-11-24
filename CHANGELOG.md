@@ -11,6 +11,19 @@
 
 - **Verified agent identity** (opt-in). List agents under `agents.keys` in `policies.yaml` and each `agent_id` needs its key: `PURSESTRING_AGENT_KEY` over stdio, `X-PurseString-Agent-Key` or the bearer token over HTTP. A verified agent can't spend under another id or touch another agent's intents, so budgets, velocity limits and the kill switch key on an id it proved. Nothing changes when no keys are listed.
 
+### Money correctness
+
+- **Split captures keep the rest held.** A capture smaller than the hold no longer frees the difference at once, since a split shipment can capture it later. The rest stops counting when the issuer releases it, a capture uses it up, a capture marked `final` closes the hold, or `jit.partial_capture_hold_days` (default 7) pass. Set it to `0` for the old behaviour.
+- **Unused expired cards give their budget back.** A single-use card that expires or closes with no approved charge no longer counts against the daily budget until UTC midnight. Only for cards whose every charge passes PurseString's real-time check (mock, and Lithic with ASA set up); other rails keep the limit reserved.
+- **`line_item_id` on purchase intents.** Optional. It joins the idempotency key, so one task can buy the same thing twice on purpose. Existing keys don't change.
+- **Re-authorizations don't double count.** A second authorization for the same transaction replaces its hold, so the monthly cap on recurring cards isn't briefly counted twice, and an issuer retry doesn't use up a single-use card.
+- **Parallel card requests can't overspend.** A card being issued, or a payout being sent, now counts against the daily budget from the moment it starts. Before, several card requests in parallel could all pass the budget check.
+
+### Tests
+
+- Concurrency tests: parallel card requests, the same card requested at once, and separate processes racing on one state file.
+- Webhook tests: the same delivery many times at once, newer updates arriving before older ones, events out of order inside one update, captures arriving before their authorization, ASA retries, parallel refunds, and stale or tampered signatures.
+
 ### Measure it
 
 - **Attack benchmark.** `npm run bench` runs scripted prompt-injected refunds, split payouts, swapped payees, double retries, loops and over-budget agents, with and without PurseString, in mock mode, and counts the dollars that moved. Results and method: [docs/attack-benchmark.md](docs/attack-benchmark.md). `test/bench.test.ts` keeps the published numbers in sync with the code.
@@ -19,6 +32,7 @@
 
 - Intents approved before this version have no stored evidence. They are re-checked against the current policy only.
 - An approved intent whose vendor you remove from the allowlist, or whose payee you change, can no longer be paid. Submit a new intent with a new task_id.
+- After a partial capture, the uncaptured rest of a card hold now keeps counting for up to 7 days. Set `jit.partial_capture_hold_days: 0` to free it on the first capture as before.
 
 ## 0.2.0 (2026-11-21)
 
