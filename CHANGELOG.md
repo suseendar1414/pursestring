@@ -2,7 +2,23 @@
 
 ## Unreleased
 
+### Explain and re-check every decision
+
+- **Policy hash on every audit entry.** Each decision-log line now carries `policy_hash`, the SHA-256 of the policy in force, and `pursestring policy` prints it, so any approval or denial can be traced to the exact rules that made it, even after `policies.yaml` changes. Each intent stores its `evidence`: the policy hash, when it was ruled on, the vendor, the rail, and the payee or x402 `payTo` it would pay, with where each came from. Approval messages now show who a payout or x402 payment goes to. The hash chain and HMAC mode are unchanged, and old logs still verify.
+- **Re-check at execution time.** Right before a card is issued, a payout is sent, an x402 authorization is signed or re-sent, or a governed PayPal tool runs, PurseString re-checks the facts the approval was based on. If the policy changed, the intent is ruled on again and a deny wins over the earlier approval. A swapped or removed payee, a changed rail route or an unpinned x402 `payTo` also refuses it. Refusals deny the intent, log `execution_recheck_failed` and return `stale_evidence`; nothing is paid.
+
+### Verified agent identity
+
+- **Verified agent identity** (opt-in). List agents under `agents.keys` in `policies.yaml` and each `agent_id` needs its key: `PURSESTRING_AGENT_KEY` over stdio, `X-PurseString-Agent-Key` or the bearer token over HTTP. A verified agent can't spend under another id or touch another agent's intents, so budgets, velocity limits and the kill switch key on an id it proved. Nothing changes when no keys are listed.
+
+### Measure it
+
 - **Attack benchmark.** `npm run bench` runs scripted prompt-injected refunds, split payouts, swapped payees, double retries, loops and over-budget agents, with and without PurseString, in mock mode, and counts the dollars that moved. Results and method: [docs/attack-benchmark.md](docs/attack-benchmark.md). `test/bench.test.ts` keeps the published numbers in sync with the code.
+
+### Upgrading
+
+- Intents approved before this version have no stored evidence. They are re-checked against the current policy only.
+- An approved intent whose vendor you remove from the allowlist, or whose payee you change, can no longer be paid. Submit a new intent with a new task_id.
 
 ## 0.2.0 (2026-11-21)
 

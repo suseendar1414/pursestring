@@ -97,5 +97,5 @@ These are the defaults that matter here. Auto-approve applies to amounts under $
 - **Real rails.** The rails are stand-ins. This measures PurseString's decisions, not Lithic's, PayPal's or Stripe's behaviour. The card rail was checked separately on the Lithic sandbox (see [real-time approval](real-time-approval.md)).
 - **A real LLM.** The agents are scripts that do exactly what the injected text says. A real model might refuse some of these attacks on its own, or find ones not listed here.
 - **A careless human.** $1,184.90 of the blocked dollars depend on the approver saying no.
-- **Spoofed agent IDs.** Each agent uses one `agent_id`. An agent that can claim a fresh `agent_id` gets a fresh daily budget and velocity window, because agent identity isn't verified yet.
+- **Spoofed agent IDs.** Each agent uses one `agent_id`. The benchmark runs without `agents.keys`, which is the default. Without keys, an agent that claims a new `agent_id` gets a new daily budget and velocity window. Listing agent keys ([verified agent identity](policies.md#verified-agent-identity)) closes that.
 - **Your policy.** Tighter limits leak less, and looser ones leak more. Change `BENCH_POLICY` in the script and run it again.

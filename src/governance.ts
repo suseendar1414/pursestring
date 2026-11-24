@@ -1,6 +1,6 @@
 import type { Rails } from "./adapters/index.js";
 import { hashApprovalCode, newApprovalCode, verifyApprovalCode, type ApprovalChannel } from "./approvals.js";
-import type { Config } from "./config.js";
+import { policyHash, stableJson, type Config } from "./config.js";
 import type { Notifier, RefundNotice } from "./notify.js";
 import { activeHalt, haltKey, similarRecent, type HaltRecord, type Halts } from "./killswitch.js";
 import { domainMatches, evaluate, evaluateToolCall, normalizeDomain, routeRail, toolCallAmount, vendorLabel, withRule } from "./policy.js";
@@ -22,8 +22,10 @@ import type {
   ActionRecord,
   AuthorizationRecord,
   CardDetails,
+  Evidence,
   IntentRecord,
   Payee,
+  PayeeDestinationField,
   PaymentRecord,
   PolicyEvaluation,
   PurchaseIntent,
@@ -38,6 +40,19 @@ export class GovernanceError extends Error {
     readonly code: string,
   ) {
     super(message);
+  }
+}
+
+/**
+ * An approved intent failed its re-check just before money moved: the facts it was approved on are no longer true.
+ * Thrown inside a claim transaction, after the record has been marked denied, so the denial is saved with it.
+ */
+class RecheckFailed extends GovernanceError {
+  constructor(
+    message: string,
+    readonly details: Record<string, unknown>,
+  ) {
+    super(message, "stale_evidence");
   }
 }
 
@@ -74,19 +89,6 @@ export interface ToolCallResult {
   result: ToolResult;
   /** True when the call had already run and PayPal's earlier answer was returned. */
   replayed: boolean;
-}
-
-/** Deterministic JSON: object keys sorted, so equal arguments always hash the same. */
-function stableJson(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
-  if (v && typeof v === "object") {
-    return `{${Object.keys(v)
-      .sort()
-      .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
-      .map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(v);
 }
 
 export function toolArgsHash(tool: string, args: Record<string, unknown>): string {
@@ -270,7 +272,138 @@ export class Governance {
     readonly store: Store,
     readonly rails: Rails,
     readonly notifier: Notifier,
-  ) {}
+  ) {
+    this.policyHash = policyHash(config.policy);
+  }
+
+  /** policyHash() of the policy this process enforces. Stamped on every audit entry and every new intent. */
+  readonly policyHash: string;
+
+  /** Append to the audit log, stamped with the hash of the policy in force, so every entry says which rules applied. */
+  audit(event: string, data: Record<string, unknown>) {
+    this.store.audit(event, { policy_hash: this.policyHash, ...data });
+  }
+
+  /**
+   * Run a claim transaction. A failed re-check marks the intent denied and throws RecheckFailed: catching it inside
+   * the transaction keeps that denial (a throw would roll it back), then it is logged and re-thrown outside.
+   */
+  private claimTx<T>(fn: (intents: Record<string, IntentRecord>, now: Date, halts: Halts) => T): T {
+    let failed: RecheckFailed | undefined;
+    const out = this.store.transact((intents, now, halts) => {
+      try {
+        return fn(intents, now, halts);
+      } catch (err) {
+        if (!(err instanceof RecheckFailed)) throw err;
+        failed = err;
+        return undefined as T;
+      }
+    });
+    if (failed) {
+      this.audit("execution_recheck_failed", failed.details);
+      throw failed;
+    }
+    return out;
+  }
+
+  /** The payee entry a payout rail would pay for this vendor today, or undefined when there isn't one. */
+  private payeeFor(vendor: string, field: PayeeDestinationField): { payee: Payee; evidence: NonNullable<Evidence["payee"]> } | undefined {
+    const entry = this.config.policy.payees.find((p) => domainMatches(vendor, p.vendor) && p[field]);
+    if (!entry) return undefined;
+    const { vendor: _vendor, ...payee } = entry;
+    return {
+      payee,
+      evidence: {
+        source: "policies.yaml#payees",
+        field,
+        destination: String(payee[field]),
+        fingerprint: createHash("sha256").update(stableJson(payee)).digest("hex"),
+      },
+    };
+  }
+
+  /** What an intent is being ruled on, written down at decision time so execution can check it still holds. */
+  private gatherEvidence(intent: PurchaseIntent, rail: string, now: Date, x402?: X402Record): Evidence {
+    const evidence: Evidence = {
+      policy_hash: this.policyHash,
+      policy_file: this.config.policyPath,
+      observed_at: now.toISOString(),
+      vendor: normalizeDomain(intent.vendor_domain),
+      rail,
+    };
+    let adapter: ReturnType<Rails["get"]> | undefined;
+    try {
+      adapter = this.rails.get(rail);
+    } catch {
+      /* rail not configured yet: execution reports that */
+    }
+    if (adapter?.kind === "payout") {
+      const found = this.payeeFor(intent.vendor_domain, adapter.payeeField ?? "receiver");
+      if (found) evidence.payee = found.evidence;
+    }
+    if (x402) {
+      evidence.x402 = { source: x402.url, pay_to: x402.pay_to, network: x402.network, asset: x402.asset, amount_atomic: x402.amount_atomic };
+    }
+    return evidence;
+  }
+
+  /**
+   * Re-check an approved intent right before money moves. When the policy changed since the decision, the intent is
+   * ruled on again and a deny now wins over the earlier approval, human or not. The rail, the payee and the x402
+   * payTo pin must still be what the decision was based on. Any mismatch denies the intent (saved by claimTx).
+   * Runs inside a transaction.
+   */
+  private recheck(rec: IntentRecord, intents: Record<string, IntentRecord>, now: Date) {
+    const ev = rec.evidence;
+    const problems: string[] = [];
+    let fresh: PolicyEvaluation | undefined;
+    if (!ev || ev.policy_hash !== this.policyHash) {
+      fresh = this.evaluateRecord(rec.intent, rec.action, intents, now);
+      if (fresh.decision === "deny") problems.push(`the policy in force now denies it: ${fresh.summary}`);
+    }
+    if (ev && !rec.action && !rec.x402) {
+      const rail = routeRail(this.config.policy, rec.intent).rail;
+      if (rail !== rec.rail) problems.push(`policy now routes it to the '${rail}' rail, not '${rec.rail}'`);
+    }
+    if (ev?.payee) {
+      const current = this.payeeFor(rec.intent.vendor_domain, ev.payee.field);
+      if (!current) problems.push(`the payee it was approved to pay (${ev.payee.destination}) is no longer in policies.yaml`);
+      else if (current.evidence.fingerprint !== ev.payee.fingerprint) {
+        problems.push(`the payee changed since approval: approved ${ev.payee.destination}, policies.yaml now says ${current.evidence.destination}`);
+      }
+    }
+    if (rec.x402) {
+      const pins = this.config.policy.x402.pay_to.filter((p) => domainMatches(rec.intent.vendor_domain, p.vendor));
+      if (pins.length && !pins.some((p) => p.address.toLowerCase() === rec.x402!.pay_to.toLowerCase())) {
+        problems.push(`payTo ${rec.x402.pay_to} is no longer the address pinned for ${normalizeDomain(rec.intent.vendor_domain)} in x402.pay_to`);
+      }
+    }
+    const ts = now.toISOString();
+    if (problems.length === 0) {
+      rec.recheck = { checked_at: ts, policy_hash: this.policyHash, outcome: !ev ? "no_evidence" : fresh ? "re_evaluated" : "unchanged" };
+      return;
+    }
+    const note = `Re-checked before paying and refused: ${problems.join("; ")}.`;
+    rec.recheck = { checked_at: ts, policy_hash: this.policyHash, outcome: "rejected", problems };
+    if (fresh) rec.evaluation = fresh;
+    rec.status = "denied";
+    rec.approved_by = undefined;
+    rec.denied_by = "policy:execution_recheck";
+    rec.decision_note = note;
+    rec.updated_at = ts;
+    throw new RecheckFailed(
+      `Intent ${rec.intent_id} was approved on facts that are no longer true, so nothing was paid. ${note} ` +
+        "Do not pay another way. If the purchase is still needed, submit a new intent with a new task_id so it is ruled on again.",
+      {
+        intent_id: rec.intent_id,
+        problems,
+        decided_under_policy_hash: ev?.policy_hash ?? null,
+        evidence_observed_at: ev?.observed_at ?? null,
+        ...(ev?.payee ? { approved_payee: ev.payee.destination } : {}),
+        ...(fresh ? { rules: fresh.rules } : {}),
+      },
+    );
+  }
 
   /** Whether `pursestring approve` needs the one-time code. Unset in policy: on whenever Slack or Discord is set up. */
   get requireCode(): boolean {
@@ -305,7 +438,7 @@ export class Governance {
       if (velocity) evaluation = withRule(evaluation, velocity);
       return { evaluation, existing: this.findRecent(intents, key, now) };
     });
-    this.store.audit("policy_checked", {
+    this.audit("policy_checked", {
       idempotency_key: key,
       intent,
       decision: out.evaluation.decision,
@@ -393,6 +526,7 @@ export class Governance {
         rail,
         ...(action ? { action } : {}),
         ...(extra.x402 ? { x402: extra.x402 } : {}),
+        evidence: this.gatherEvidence(intent, rail, now, extra.x402),
         ...(status === "approved" ? { approved_by: "policy:auto_approve" } : {}),
         ...(status === "denied" ? { denied_by: "policy" } : {}),
       };
@@ -406,7 +540,7 @@ export class Governance {
 
     const { record, deduplicated } = result;
     if (deduplicated) {
-      this.store.audit("duplicate_intent_blocked", {
+      this.audit("duplicate_intent_blocked", {
         intent_id: record.intent_id,
         idempotency_key: key,
         status: record.status,
@@ -414,7 +548,7 @@ export class Governance {
       });
     } else {
       // The "black box" entry: what the agent wanted, why, what it tried, and how each rule ruled.
-      this.store.audit("intent_submitted", {
+      this.audit("intent_submitted", {
         intent_id: record.intent_id,
         idempotency_key: key,
         intent,
@@ -433,6 +567,7 @@ export class Governance {
         },
         status: record.status,
         policy_file: this.config.policyPath,
+        evidence: record.evidence,
       });
       if (record.status === "pending_approval") await this.notifier.approvalRequested(record, { code: approvalCode });
     }
@@ -463,6 +598,7 @@ export class Governance {
         rec.status,
       );
     }
+    this.recheck(rec, intents, now);
     if (rec.approved_by === "policy:auto_approve") {
       const fresh = this.evaluateRecord(rec.intent, rec.action, intents, now);
       if (fresh.decision !== "auto_approve") {
@@ -512,7 +648,7 @@ export class Governance {
       );
     }
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "issue"; record: IntentRecord };
-    const claim = this.store.transact((intents, now, halts): Claim => {
+    const claim = this.claimTx((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (!rec) throw new GovernanceError(`No intent ${intentId}. Call submit_purchase_intent first.`, "not_found");
       // Halted agents don't get card details again either: the card itself declines, but don't hand it out.
@@ -545,7 +681,7 @@ export class Governance {
 
     if (claim.kind === "replay") {
       const card = await this.railFor(claim.record).getCard(claim.record.card!);
-      this.store.audit("card_replayed", {
+      this.audit("card_replayed", {
         intent_id: intentId,
         card_token: card.token,
         last_four: card.last_four,
@@ -572,7 +708,7 @@ export class Governance {
         intents[intentId].status = "approved";
         intents[intentId].updated_at = now.toISOString();
       });
-      this.store.audit("card_issue_failed", { intent_id: intentId, adapter: adapter.name, error: String(err) });
+      this.audit("card_issue_failed", { intent_id: intentId, adapter: adapter.name, error: String(err) });
       throw new GovernanceError(`Card issuer error: ${(err as Error).message}`, "adapter_error");
     }
 
@@ -594,7 +730,7 @@ export class Governance {
       };
       return r;
     });
-    this.store.audit("card_issued", {
+    this.audit("card_issued", {
       intent_id: intentId,
       adapter: card.adapter,
       card_token: card.token,
@@ -604,6 +740,7 @@ export class Governance {
       single_use: card.single_use,
       expires_at: updated.card?.expires_at,
       approved_by: updated.approved_by,
+      recheck: updated.recheck,
     });
     return { card: { ...card, expires_at: updated.card?.expires_at }, record: updated, replayed: false };
   }
@@ -628,7 +765,7 @@ export class Governance {
     }
 
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; payee: Payee };
-    const claim = this.store.transact((intents, now, halts): Claim => {
+    const claim = this.claimTx((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "paid" && rec.payment) return { kind: "replay", record: rec };
       this.assertNotHalted(rec, halts);
@@ -645,8 +782,8 @@ export class Governance {
       }
       // The first payee entry for this vendor that has a destination this rail can pay.
       const field = adapter.payeeField ?? "receiver";
-      const entry = this.config.policy.payees.find((p) => domainMatches(rec.intent.vendor_domain, p.vendor) && p[field]);
-      if (!entry) {
+      const found = this.payeeFor(rec.intent.vendor_domain, field);
+      if (!found) {
         throw new GovernanceError(
           `No payee on file for ${normalizeDomain(rec.intent.vendor_domain)} on the '${adapter.name}' rail (it pays to a payee's ` +
             `${field}), so PurseString doesn't know where to send the money. ` +
@@ -654,10 +791,23 @@ export class Governance {
           "no_payee",
         );
       }
+      const approved = rec.evidence?.payee;
+      if (approved && rec.status === "paying" && approved.fingerprint !== found.evidence.fingerprint) {
+        // A crashed payment may already have reached the approved payee: don't redirect it, and don't mark it denied.
+        throw new GovernanceError(
+          `${intentId} was interrupted mid-payment and its payee has changed since (approved ${approved.destination}, now ` +
+            `${found.evidence.destination}). Check in ${adapter.name} whether the first payment went through. Do not retry.`,
+          "outcome_unknown",
+        );
+      }
+      if (!approved && rec.evidence) {
+        // Approved before a payee was on file: the human added it since. Record that it was first seen at payment time.
+        rec.evidence.payee = found.evidence;
+        rec.evidence.payee_added_after_decision = now.toISOString();
+      }
       rec.status = "paying";
       rec.updated_at = now.toISOString();
-      const { vendor: _vendor, ...payee } = entry;
-      return { kind: "pay", record: rec, payee };
+      return { kind: "pay", record: rec, payee: found.payee };
     });
 
     if (claim.kind === "replay") {
@@ -676,7 +826,7 @@ export class Governance {
           /* status refresh is best-effort; the payment itself already happened */
         }
       }
-      this.store.audit("payment_replayed", {
+      this.audit("payment_replayed", {
         intent_id: intentId,
         payment_id: payment.payment_id,
         note: "Intent already paid: returned the existing payment, no money moved.",
@@ -699,7 +849,7 @@ export class Governance {
         intents[intentId].status = "approved";
         intents[intentId].updated_at = now.toISOString();
       });
-      this.store.audit("payment_failed", { intent_id: intentId, adapter: adapter.name, error: String(err) });
+      this.audit("payment_failed", { intent_id: intentId, adapter: adapter.name, error: String(err) });
       throw new GovernanceError(`Payment rail error: ${(err as Error).message}`, "adapter_error");
     }
 
@@ -719,7 +869,7 @@ export class Governance {
       };
       return r;
     });
-    this.store.audit("payment_sent", {
+    this.audit("payment_sent", {
       intent_id: intentId,
       adapter: adapter.name,
       payment_id: sent.payment_id,
@@ -729,6 +879,8 @@ export class Governance {
       payee: claim.payee,
       paid_to: updated.payment!.paid_to,
       approved_by: updated.approved_by,
+      payee_source: updated.evidence?.payee?.source,
+      recheck: updated.recheck,
     });
     return { payment: updated.payment!, record: updated, replayed: false };
   }
@@ -775,7 +927,7 @@ export class Governance {
     }
 
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "run"; record: IntentRecord };
-    const claim = this.store.transact((intents, now, halts): Claim => {
+    const claim = this.claimTx((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "executed") return { kind: "replay", record: rec };
       if (rec.status === "executing") {
@@ -794,7 +946,7 @@ export class Governance {
     });
 
     if (claim.kind === "replay") {
-      this.store.audit("paypal_tool_replayed", {
+      this.audit("paypal_tool_replayed", {
         intent_id: intentId,
         tool,
         note: "Call already ran: returned PayPal's earlier answer, nothing sent to PayPal.",
@@ -813,13 +965,13 @@ export class Governance {
       result = await run(args);
     } catch (err) {
       revert();
-      this.store.audit("paypal_tool_failed", { intent_id: intentId, tool, error: String(err) });
+      this.audit("paypal_tool_failed", { intent_id: intentId, tool, error: String(err) });
       throw new GovernanceError(`PayPal MCP error: ${(err as Error).message}`, "adapter_error");
     }
     if (result.isError) {
       // PayPal refused, so nothing happened; the approval still stands for a retry.
       const record = revert();
-      this.store.audit("paypal_tool_rejected", { intent_id: intentId, tool, result: result.content });
+      this.audit("paypal_tool_rejected", { intent_id: intentId, tool, result: result.content });
       return { record, result, replayed: false };
     }
     const record = this.store.transact((intents, now) => {
@@ -829,12 +981,13 @@ export class Governance {
       r.action = { ...r.action!, executed_at: now.toISOString(), result };
       return r;
     });
-    this.store.audit("paypal_tool_executed", {
+    this.audit("paypal_tool_executed", {
       intent_id: intentId,
       tool,
       args,
       amount: record.intent.amount,
       approved_by: record.approved_by,
+      recheck: record.recheck,
     });
     return { record, result, replayed: false };
   }
@@ -935,7 +1088,7 @@ export class Governance {
       // Cheapest usable option.
       requirement = usable.sort((a, b) => (BigInt(a.amount) < BigInt(b.amount) ? -1 : 1))[0];
       if (!requirement) {
-        this.store.audit("x402_unpayable", { url: url.href, agent_id: input.agent_id, reasons });
+        this.audit("x402_unpayable", { url: url.href, agent_id: input.agent_id, reasons });
         throw new GovernanceError(`PurseString can't pay ${url.href}: ${reasons.join("; ")}.`, "x402_unsupported");
       }
       const cents = atomicToCents(requirement.amount);
@@ -972,7 +1125,7 @@ export class Governance {
   }
 
   private x402Replay(rec: IntentRecord): X402FetchResult {
-    this.store.audit("payment_replayed", {
+    this.audit("payment_replayed", {
       intent_id: rec.intent_id,
       payment_id: rec.payment?.payment_id,
       note: "x402 resource already paid: returned the stored response, nothing paid again.",
@@ -986,7 +1139,7 @@ export class Governance {
     fresh: { requirement: X402Requirement; resource: unknown } | undefined,
   ): Promise<X402FetchResult> {
     type Claim = { kind: "replay"; record: IntentRecord } | { kind: "pay"; record: IntentRecord; header: { name: string; value: string } };
-    const claim = this.store.transact((intents, now, halts): Claim => {
+    const claim = this.claimTx((intents, now, halts): Claim => {
       const rec = intents[intentId];
       if (rec.status === "paid") return { kind: "replay", record: rec };
       this.assertNotHalted(rec, halts);
@@ -1036,14 +1189,14 @@ export class Governance {
       res = await request({ [claim.header.name]: claim.header.value });
     } catch (err) {
       revert();
-      this.store.audit("payment_failed", { intent_id: intentId, adapter: "x402", error: String(err) });
+      this.audit("payment_failed", { intent_id: intentId, adapter: "x402", error: String(err) });
       throw new GovernanceError(`x402 request failed: ${(err as Error).message}. Retrying re-sends the same authorization.`, "adapter_error");
     }
     const settlement = parseSettlement(res.headers);
     const response = await this.readResponse(res);
     if (!res.ok || settlement?.success === false) {
       revert();
-      this.store.audit("payment_failed", {
+      this.audit("payment_failed", {
         intent_id: intentId,
         adapter: "x402",
         http_status: res.status,
@@ -1075,7 +1228,7 @@ export class Governance {
       };
       return r;
     });
-    this.store.audit("payment_sent", {
+    this.audit("payment_sent", {
       intent_id: intentId,
       adapter: "x402",
       payment_id: record.payment!.payment_id,
@@ -1087,6 +1240,8 @@ export class Governance {
       currency: "USD",
       from: record.x402!.authorization!.from,
       approved_by: record.approved_by,
+      terms_observed_at: record.evidence?.observed_at,
+      recheck: record.recheck,
     });
     return { paid: true, replayed: false, record, response, transaction: record.x402!.transaction };
   }
@@ -1165,20 +1320,20 @@ export class Governance {
       return { halt: h };
     });
     if (out.error) {
-      this.store.audit("resume_code_rejected", { key, by: opts.by, via: opts.via, attempts: out.halt.resume_code_attempts });
+      this.audit("resume_code_rejected", { key, by: opts.by, via: opts.via, attempts: out.halt.resume_code_attempts });
       throw out.error;
     }
-    this.store.audit("kill_switch_resumed", { scope: out.halt.scope, agent_id: out.halt.agent_id, by: opts.by, via: opts.via });
+    this.audit("kill_switch_resumed", { scope: out.halt.scope, agent_id: out.halt.agent_id, by: opts.by, via: opts.via });
     return out.halt;
   }
 
   private async haltNotice(halt: HaltRecord, code?: string) {
     const { resume_code: _c, ...entry } = halt;
-    this.store.audit("kill_switch_tripped", entry);
+    this.audit("kill_switch_tripped", entry);
     try {
       await this.notifier.killSwitchTripped?.(halt, { code });
     } catch (err) {
-      this.store.audit("kill_switch_notify_failed", { agent_id: halt.agent_id, error: String(err) });
+      this.audit("kill_switch_notify_failed", { agent_id: halt.agent_id, error: String(err) });
     }
   }
 
@@ -1244,7 +1399,7 @@ export class Governance {
       return { rec: r };
     });
     if (out.error) {
-      this.store.audit("approval_code_rejected", {
+      this.audit("approval_code_rejected", {
         intent_id: intentId,
         by,
         via: opts.via,
@@ -1253,7 +1408,14 @@ export class Governance {
       });
       throw out.error;
     }
-    this.store.audit(approve ? "human_approved" : "human_denied", { intent_id: intentId, by, via: opts.via, note });
+    this.audit(approve ? "human_approved" : "human_denied", {
+      intent_id: intentId,
+      by,
+      via: opts.via,
+      note,
+      // The approver's process may run a different policy than the one that ruled on the intent: both are on record.
+      decided_under_policy_hash: out.rec.evidence?.policy_hash,
+    });
     return out.rec;
   }
 
@@ -1267,14 +1429,14 @@ export class Governance {
       try {
         await this.railFor(rec).closeCard?.(rec.card!);
       } catch (err) {
-        this.store.audit("card_close_failed", { intent_id: rec.intent_id, error: String(err) });
+        this.audit("card_close_failed", { intent_id: rec.intent_id, error: String(err) });
         continue;
       }
       this.store.transact((intents, now) => {
         const c = intents[rec.intent_id].card;
         if (c) c.closed_at = now.toISOString();
       });
-      this.store.audit("card_closed", { intent_id: rec.intent_id, card_token: rec.card!.token, reason: "ttl" });
+      this.audit("card_closed", { intent_id: rec.intent_id, card_token: rec.card!.token, reason: "ttl" });
       closed++;
     }
     return closed;
@@ -1365,7 +1527,7 @@ export class Governance {
       return decide("approved", "Matches the approved intent.");
     });
     const decision = { ...result, latency_ms: Math.round((performance.now() - t0) * 100) / 100 };
-    this.store.audit("jit_authorization", {
+    this.audit("jit_authorization", {
       ...decision,
       card_token: req.card_token,
       transaction_id: req.transaction_id,
@@ -1452,7 +1614,7 @@ export class Governance {
       rec.updated_at = now.toISOString();
       return { outcome: input.kind === "capture" ? "captured" : "released", message, ...totals() };
     });
-    this.store.audit(result.outcome === "duplicate" || result.outcome === "unmatched" ? `settlement_${result.outcome}` : `hold_${result.outcome}`, {
+    this.audit(result.outcome === "duplicate" || result.outcome === "unmatched" ? `settlement_${result.outcome}` : `hold_${result.outcome}`, {
       intent_id: result.intent_id,
       event_id: input.event_id,
       type: input.type,
@@ -1552,7 +1714,7 @@ export class Governance {
     });
 
     const { result, notice } = out;
-    this.store.audit(result.outcome === "credited" ? "refund_credited" : `refund_${result.outcome}`, {
+    this.audit(result.outcome === "credited" ? "refund_credited" : `refund_${result.outcome}`, {
       intent_id: result.intent_id,
       refund_id: input.refund_id,
       amount,
@@ -1568,7 +1730,7 @@ export class Governance {
       try {
         await this.notifier.refundRecorded?.(notice);
       } catch (err) {
-        this.store.audit("refund_notify_failed", { intent_id: result.intent_id, refund_id: input.refund_id, error: String(err) });
+        this.audit("refund_notify_failed", { intent_id: result.intent_id, refund_id: input.refund_id, error: String(err) });
       }
     }
     return result;
