@@ -243,7 +243,8 @@ export function createMcpServer(gov: Governance, upstream?: Upstream): McpServer
       description:
         "Declare a purchase before making it. Policy decides: auto-approve, pause for a human (Slack/Discord), or deny. " +
         "Submitting the same agent_id + task_id + vendor + amount again inside the idempotency window returns the " +
-        "original intent instead of creating a second one.",
+        "original intent instead of creating a second one. To buy the same thing twice for one task on purpose, give each " +
+        "purchase its own line_item_id.",
       inputSchema: PurchaseIntentShape,
       annotations: { idempotentHint: true },
     },

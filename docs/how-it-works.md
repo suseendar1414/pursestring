@@ -85,18 +85,19 @@ An approved authorization is a hold, not a charge. Lithic later reports what hap
 
 | Lithic event | What PurseString does |
 |---|---|
-| `CLEARING`, `FINANCIAL_AUTHORIZATION` | Records what was captured and ends the hold. A capture smaller than the hold frees the difference; a bigger one (a tip) counts what was really taken. |
+| `CLEARING`, `FINANCIAL_AUTHORIZATION` | Records what was captured. A capture smaller than the hold keeps the rest held, because a split shipment can capture it later; it stops counting when the issuer releases it, when a capture uses it up, or `jit.partial_capture_hold_days` (default 7) after the first capture. A bigger capture (a tip) counts what was really taken. |
 | `AUTHORIZATION_REVERSAL`, `VOID` | Frees that much of the hold, or all of it when the event has no amount. |
 | `AUTHORIZATION_EXPIRY` | Frees whatever is still held. |
 
 What that changes:
 
-- **Recurring cards** are capped on what was captured plus what is still held, so a released hold or a smaller capture gives room back under the monthly cap.
+- **Recurring cards** are capped on what was captured plus what is still held, so a released hold or a final smaller capture gives room back under the monthly cap.
+- **Re-authorizations** of the same transaction (the issuer asking again about the same `token`) replace that transaction's hold instead of adding a second one, so they aren't counted twice against the monthly cap and don't use up a single-use card. The new amount is the hold's new total and is held to the same limit. Once a capture or release has landed on the transaction, a further authorization counts on its own.
 - **Single-use cards** are used up by a hold that's still open or captured, not by one the merchant released, so a hotel or gas station that drops a hold and places a new one isn't refused by PurseString. Lithic's own `SINGLE_USE` cards close at the issuer after their first approved authorization, so on Lithic the issuer may still decline that second hold.
-- **The daily budget** reserves a single-use card's limit until its charge is captured, then counts what was captured. Recurring cards keep their limit reserved, since they can still renew.
+- **The daily budget** reserves a single-use card's limit until its charge is captured, then counts what was captured plus any part still held. A single-use card that expires or closes with no approved charge (or only released ones) gives its limit back, when every charge on it had to pass PurseString's real-time check: the mock rail, and Lithic with ASA set up (`jit.enabled` and `LITHIC_WEBHOOK_SECRET`). On rails without that check (Privacy, Airwallex) the limit stays reserved, since a charge could have happened that PurseString never saw. Recurring cards keep their limit reserved, since they can still renew. A card being issued or a payout being sent counts from the moment it starts, so parallel requests can't overspend between the check and the rail call.
 - **Refunds** are checked against what was captured, not the hold.
 
-Events arrive on `POST /webhooks/lithic` with refunds (same subscription, same `LITHIC_EVENTS_SECRET`). Each event's ID is applied once, so Lithic re-sending the whole event list is harmless. An event for a hold PurseString didn't approve is logged as `settlement_unmatched` and changes nothing. Other rails, or a person, can call `POST /settlements` with the admin token: `{"event_id": "...", "kind": "capture", "amount": 12.00, "transaction_id": "..."}` (`kind` is `capture` or `release`; `card_token` works instead of `transaction_id` when the card has exactly one open hold). Pass `transaction_id` to `POST /jit/authorize` so later events can find the hold.
+Events arrive on `POST /webhooks/lithic` with refunds (same subscription, same `LITHIC_EVENTS_SECRET`). Each event's ID is applied once, so Lithic re-sending the whole event list is harmless. An event for a hold PurseString didn't approve is logged as `settlement_unmatched` and changes nothing. Other rails, or a person, can call `POST /settlements` with the admin token: `{"event_id": "...", "kind": "capture", "amount": 12.00, "transaction_id": "..."}` (`kind` is `capture` or `release`; add `"final": true` to a capture when no more captures will come, which frees the rest of the hold now; `card_token` works instead of `transaction_id` when the card has exactly one open hold). Pass `transaction_id` to `POST /jit/authorize` so later events can find the hold.
 
 ## Short-lived cards
 
@@ -119,6 +120,7 @@ Budget comes back on the day the card was issued, since that's the day it counte
 | Field | Why it's required |
 |---|---|
 | `agent_id`, `task_id` | Who is spending, for what. Half of the idempotency key, and the unit for daily budgets. |
+| `line_item_id` (optional) | Set it when one task buys the same thing more than once on purpose (`seat-1`, `seat-2`). It joins the idempotency key, so each line item is its own purchase and a retry of one line item is still deduplicated. |
 | `task_goal` | Forces the agent to state the purpose. Goes in the approval message and the log. |
 | `vendor_domain`, `amount`, `currency` | What the card will be locked to. |
 | `is_recurring` | Subscriptions are the highest-risk spend because they keep charging. They always go to a human by default. |

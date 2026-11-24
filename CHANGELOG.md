@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Money correctness
+
+- **Split captures keep the rest held.** A capture smaller than the hold no longer frees the difference at once, since a split shipment can capture it later. The rest stops counting when the issuer releases it, a capture uses it up, a capture marked `final` closes the hold, or `jit.partial_capture_hold_days` (default 7) pass. Set it to `0` for the old behaviour.
+- **Unused expired cards give their budget back.** A single-use card that expires or closes with no approved charge no longer counts against the daily budget until UTC midnight. Only for cards whose every charge passes PurseString's real-time check (mock, and Lithic with ASA set up); other rails keep the limit reserved.
+- **`line_item_id` on purchase intents.** Optional. It joins the idempotency key, so one task can buy the same thing twice on purpose. Existing keys don't change.
+- **Re-authorizations don't double count.** A second authorization for the same transaction replaces its hold, so the monthly cap on recurring cards isn't briefly counted twice, and an issuer retry doesn't use up a single-use card.
+- **Parallel card requests can't overspend.** A card being issued, or a payout being sent, now counts against the daily budget from the moment it starts. Before, several card requests in parallel could all pass the budget check.
+
+### Tests
+
+- Concurrency tests: parallel card requests, the same card requested at once, and separate processes racing on one state file.
+- Webhook tests: the same delivery many times at once, newer updates arriving before older ones, events out of order inside one update, captures arriving before their authorization, ASA retries, parallel refunds, and stale or tampered signatures.
+
 ## 0.2.0 (2026-11-21)
 
 ⚠️ Still alpha. Start with low limits. Rails marked "stub-tested" have only been run against recorded or stubbed API responses, never a live account.

@@ -5,6 +5,14 @@ import { z } from "zod";
 export const PurchaseIntentShape = {
   agent_id: z.string().min(1).describe("Stable identifier of the calling agent, e.g. 'invoice-bot'."),
   task_id: z.string().min(1).describe("Identifier of the task this purchase serves, e.g. '102'."),
+  line_item_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Optional. Set it when one task buys the same thing more than once on purpose, e.g. 'seat-1', 'seat-2'. " +
+        "Each line item is its own purchase; resubmitting the same line item is a retry and returns the original intent.",
+    ),
   task_goal: z.string().min(1).describe("What the agent is trying to accomplish and why this purchase is needed."),
   vendor_domain: z.string().min(1).describe("Merchant domain, e.g. 'pdfocr.io'."),
   amount: z.number().positive().describe("Amount to spend, in major units of the currency (e.g. 15.00)."),
@@ -120,8 +128,19 @@ export interface AuthorizationRecord {
   captured?: number;
   /** Released without being captured (reversal, void, or the hold expiring), in major units. */
   released?: number;
-  /** When the first capture landed. Capture ends the hold: anything not captured stops counting. */
+  /** When the first capture landed. */
   settled_at?: string;
+  /**
+   * After a partial capture, the rest of the hold keeps counting until this time (jit.partial_capture_hold_days),
+   * since a split shipment can still capture it. A later capture, a release, or a final capture ends it sooner.
+   */
+  leftover_until?: string;
+  /** When the hold was closed for good: a capture marked final. Nothing left on it counts after this. */
+  hold_closed_at?: string;
+  /** Set when a re-authorization of the same transaction replaced this hold. The newer record counts instead. */
+  superseded_at?: string;
+  /** True on an approved re-authorization that replaced an earlier hold for the same transaction. */
+  reauthorization?: boolean;
   /** held, captured or released. Updated by issuer events. */
   hold_status?: "held" | "captured" | "released";
   /** Issuer event IDs already applied, so a retried webhook never counts twice. */
@@ -139,6 +158,11 @@ export interface CardReference {
   single_use: boolean;
   /** Single-use cards stop working after this time. */
   expires_at?: string;
+  /**
+   * True when every charge on this card has to pass PurseString's real-time check (mock rail, or Lithic with ASA set
+   * up), so a card that expires with no approved charge is known to be unused and gives its budget back.
+   */
+  jit_gated?: boolean;
   closed_at?: string;
 }
 

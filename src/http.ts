@@ -274,6 +274,7 @@ export function startHttp(
           card_token: body.card_token,
           amount: body.amount,
           currency: body.currency,
+          ...(body.final === true ? { final: true } : {}),
           type: body.type,
           source: "http",
         });

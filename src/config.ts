@@ -296,8 +296,13 @@ const PolicySchema = z.object({
       tolerance_percent: z.number().nonnegative().default(0),
       /** Decline when the merchant descriptor doesn't mention the vendor's name. On by default: the card is for that vendor only. */
       require_merchant_match: z.boolean().default(true),
+      /**
+       * After a capture smaller than the hold, keep counting the rest for this many days, since a split shipment can
+       * still capture it. A release, a final capture or a later capture that uses it up ends it sooner. 0: a capture ends the hold.
+       */
+      partial_capture_hold_days: z.number().nonnegative().default(7),
     })
-    .default({ enabled: true, tolerance_percent: 0, require_merchant_match: true }),
+    .default({ enabled: true, tolerance_percent: 0, require_merchant_match: true, partial_capture_hold_days: 7 }),
 });
 
 export type Policy = z.infer<typeof PolicySchema>;

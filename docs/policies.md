@@ -102,6 +102,7 @@ jit:
   enabled: true                   # answer the issuer's real-time authorization webhook
   tolerance_percent: 0            # allow this much over the approved amount
   require_merchant_match: true    # decline when the descriptor doesn't mention the vendor
+  partial_capture_hold_days: 7    # after a partial capture, keep the rest held this long (split shipments); 0 = a capture ends the hold
 ```
 
 ## Rail routing
@@ -226,12 +227,12 @@ Vendors are compared as domains. `https://www.PDFocr.io/checkout` becomes `pdfoc
 
 ## Idempotency
 
-The key is `SHA256(agent_id ␟ task_id ␟ normalized vendor ␟ amount to the cent)`, with a separator between fields so different splits can't collide. Within `idempotency.window_minutes`:
+The key is `SHA256(agent_id ␟ task_id ␟ normalized vendor ␟ amount to the cent)`, plus `␟ line:<line_item_id>` when the intent has one, with a separator between fields so different splits can't collide. Intents without a line item keep exactly the keys they had before. Within `idempotency.window_minutes`:
 
 - `submit_purchase_intent` with the same key returns the original intent (and doesn't ping Slack again).
 - `request_ephemeral_card` for an intent that already has a card returns that same card.
 
-After the window, a card that was already issued is never re-issued for the same intent. A genuinely new purchase needs a new `task_id`.
+After the window, a card that was already issued is never re-issued for the same intent. A genuinely new purchase needs a new `task_id`, or a new `line_item_id` when one task buys the same thing twice on purpose (two seats, two copies). Line items don't get around loop detection: near-identical purchases count toward `kill_switch.loop_detection` whatever their task or line item.
 
 ## Recipes
 
