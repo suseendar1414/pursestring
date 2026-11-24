@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Attack benchmark.** `npm run bench` runs scripted prompt-injected refunds, split payouts, swapped payees, double retries, loops and over-budget agents, with and without PurseString, in mock mode, and counts the dollars that moved. Results and method: [docs/attack-benchmark.md](docs/attack-benchmark.md). `test/bench.test.ts` keeps the published numbers in sync with the code.
+
 ## 0.2.0 (2026-11-21)
 
 ⚠️ Still alpha. Start with low limits. Rails marked "stub-tested" have only been run against recorded or stubbed API responses, never a live account.

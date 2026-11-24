@@ -10,6 +10,7 @@
     "dev": "tsx src/index.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "bench": "tsx bench/attack-benchmark.ts",
     "prepare": "npm run build"
   },
   "keywords": [
