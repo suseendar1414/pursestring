@@ -98,6 +98,52 @@ export interface IntentRecord {
   refunded_total?: number;
   /** Set once any refund lands. Kept apart from `status` so a refunded subscription card keeps working. */
   refund_status?: RefundStatus;
+  /** What the decision was based on, captured when the intent was ruled on. Re-checked before money moves. */
+  evidence?: Evidence;
+  /** The last re-check before money moved (or before it was refused). */
+  recheck?: RecheckRecord;
+}
+
+/**
+ * The facts an intent was ruled on: which policy, and where the payment would go, with where each fact came from and
+ * when it was seen. Intents written before evidence existed have none, and are re-checked on policy alone.
+ */
+export interface Evidence {
+  /** policyHash() of the policy that ruled on the intent. */
+  policy_hash: string;
+  /** The policies.yaml it was loaded from, or null for built-in defaults. */
+  policy_file: string | null;
+  /** When the evidence below was gathered. */
+  observed_at: string;
+  /** The vendor, normalized. */
+  vendor: string;
+  /** The rail policy routing chose. */
+  rail: string;
+  /** Payout rails: the destination from the payee directory the approver was shown. */
+  payee?: {
+    source: "policies.yaml#payees";
+    /** The payee field this rail pays to. */
+    field: PayeeDestinationField;
+    destination: string;
+    /** SHA-256 of the whole payee entry, so a changed type or wallet is caught too. */
+    fingerprint: string;
+  };
+  /** Set when the payee was added to policies.yaml after the decision and first seen when paying. */
+  payee_added_after_decision?: string;
+  /** x402: the payment terms the resource asked for, read from its 402 answer. */
+  x402?: { source: string; pay_to: string; network: string; asset: string; amount_atomic: string };
+}
+
+export interface RecheckRecord {
+  checked_at: string;
+  /** Hash of the policy in force at the re-check. */
+  policy_hash: string;
+  /**
+   * unchanged: same policy as the decision. re_evaluated: the policy changed and the intent still passes.
+   * no_evidence: an intent from before evidence was recorded, checked against today's policy only. rejected: refused.
+   */
+  outcome: "unchanged" | "re_evaluated" | "no_evidence" | "rejected";
+  problems?: string[];
 }
 
 export type RefundStatus = "partially_refunded" | "refunded";

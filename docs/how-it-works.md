@@ -194,6 +194,23 @@ Plain SHA-256 catches edits, but anyone who can write the file can rebuild the w
 
 Limits: a chain can't tell that the newest entries were cut off the end. `verify-log` prints the head hash, so record it somewhere else (a ticket, a Slack message) when you need to prove later that nothing was dropped. Lines written before chaining existed are reported as `legacy_entries` and are not protected.
 
+### Which rules decided
+
+Every entry carries `policy_hash`: SHA-256 over the policy the deciding process enforced, after defaults and environment overrides are filled in. Comments and key order in `policies.yaml` don't change it; any rule change does. `pursestring policy` prints the hash of the policy in force, so keep `policies.yaml` in version control and you can later match any decision to the exact rules that made it.
+
+Each intent also stores its `evidence`: the policy hash it was ruled on, when it was ruled on (`observed_at`), the vendor, the rail, and where the money would go. For payout rails that's the payee from `policies.yaml` (with a fingerprint of the whole entry); for x402 it's the `payTo`, network, asset and price read from the resource's 402 answer. `human_approved` entries carry `decided_under_policy_hash` too, since the approving terminal may run a different policy file than the server.
+
+### Re-check before money moves
+
+An approval is only as good as the facts it was made on. Right before a card is issued, a payout is sent, an x402 authorization is signed or re-sent, or a governed PayPal tool runs, PurseString checks those facts again:
+
+- If the policy changed since the decision, the intent is ruled on again. A deny now beats the earlier approval, whether a person or the policy approved it.
+- The rail must still be the one policy routes the vendor to.
+- A payout must still go to the payee the approver saw. A payee swapped or removed in `policies.yaml` refuses the payment.
+- An x402 `payTo` must still match the address pinned in `x402.pay_to`.
+
+A failed re-check denies the intent (`denied_by: policy:execution_recheck`), logs `execution_recheck_failed` with what changed, and returns `stale_evidence` to the agent; nothing is paid. Passing re-checks are logged on the payment entry as `recheck.outcome`: `unchanged`, `re_evaluated` (policy changed, still allowed) or `no_evidence` (an intent from before this version, checked against today's policy only). A payee added to `policies.yaml` after the decision is paid and marked `payee_added_after_decision`, because adding it is itself a human edit. A payout that crashed mid-call and whose payee has since changed is not re-sent anywhere: it returns `outcome_unknown` so a human can check the rail first.
+
 ## Payment adapters
 
 An adapter is two methods:
