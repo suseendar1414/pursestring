@@ -97,6 +97,8 @@ function summaryLines(rec: IntentRecord, code?: string): string[] {
     `*Goal:* ${i.task_goal}`,
     `*Spend:* ${formatMoney(i.amount, i.currency)} at ${i.vendor_domain}${i.is_recurring ? "  (RECURRING)" : ""}`,
     `*Rail:* ${rec.rail}`,
+    ...(rec.evidence?.payee ? [`*Pays to:* ${rec.evidence.payee.destination} (payee on file in policies.yaml)`] : []),
+    ...(rec.x402 ? [`*Pays to:* ${rec.x402.pay_to} on ${rec.x402.network} (from ${rec.x402.url})`] : []),
     `*Alternatives tried:* ${i.alternatives_attempted.length ? i.alternatives_attempted.join("; ") : "none"}`,
     `*Why it needs you:* ${failed.map((r) => `${r.rule}: ${r.detail}`).join(" | ")}`,
     "",
