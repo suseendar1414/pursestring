@@ -181,6 +181,11 @@ export interface SettlementInput {
   /** Major units, positive. Leave it out on a release to release the whole remaining hold. */
   amount?: number;
   currency?: string;
+  /**
+   * Captures only: true when the issuer says this is the last capture, so whatever is left of the hold is freed now.
+   * Left out, the rest stays held (a split shipment may capture it) for jit.partial_capture_hold_days.
+   */
+  final?: boolean;
   /** The issuer's event type, for the audit log, e.g. CLEARING. */
   type?: string;
   source: string;
@@ -242,11 +247,11 @@ const recordCurrency = (rec: IntentRecord) => rec.card?.currency ?? rec.intent.c
  * What was actually charged on an intent's card, in minor units: for approved real-time authorizations, what was
  * captured plus what is still held (a released hold counts nothing); without them, what the card has cost.
  */
-function chargedMinor(rec: IntentRecord): number {
+function chargedMinor(rec: IntentRecord, now: Date = new Date()): number {
   const cur = recordCurrency(rec);
   const approved = (rec.authorizations ?? []).filter((a) => a.approved);
-  if (approved.length) return approved.reduce((sum, a) => sum + usedMinor(a, cur), 0);
-  return cardCostMinor(rec);
+  if (approved.length) return approved.reduce((sum, a) => sum + usedMinor(a, cur, now), 0);
+  return cardCostMinor(rec, now);
 }
 
 /** What was actually charged on an intent's card: captured or still held on approved authorizations, else the card's limit. */
@@ -580,6 +585,17 @@ export class Governance {
   }
 
   /**
+   * Whether every charge on a card from this rail has to pass `authorize` first, so PurseString has seen every charge
+   * there is. True for the mock rail, and for Lithic when JIT is on and the ASA secret is set (Lithic then asks before
+   * approving any charge). Privacy and Airwallex have no real-time hook wired up, so a charge could happen unseen.
+   */
+  private jitGated(adapterName: string): boolean {
+    if (adapterName === "mock") return true;
+    if (adapterName === "lithic") return this.config.policy.jit.enabled && Boolean(this.config.env.lithicWebhookSecret);
+    return false;
+  }
+
+  /**
    * The checks every way of moving money shares: the intent must be approved and live, and an auto-approval is
    * re-checked against today's budget, since other spends may have happened since submit. Runs inside a transaction.
    */
@@ -727,6 +743,7 @@ export class Governance {
         ...(card.single_use
           ? { expires_at: new Date(now.getTime() + this.config.policy.cards.ttl_minutes * 60_000).toISOString() }
           : {}),
+        ...(this.jitGated(card.adapter) ? { jit_gated: true } : {}),
       };
       return r;
     });
@@ -1451,6 +1468,15 @@ export class Governance {
     const jit = this.config.policy.jit;
     const result = this.store.transact((intents, now, halts) => {
       const rec = Object.values(intents).find((r) => r.card?.token === req.card_token);
+      // A second authorization for a transaction that already has an open hold (the issuer retrying, or the merchant
+      // re-authorizing the same transaction) replaces that hold instead of adding a second one, so it isn't counted
+      // twice against the monthly cap and doesn't use up a single-use card. Its amount is the hold's new total.
+      // Only an untouched hold is replaced: once a capture or release has landed on it, the new one counts on its own.
+      const replaces = req.transaction_id
+        ? rec?.authorizations?.find(
+            (a) => a.approved && !a.superseded_at && a.transaction_id === req.transaction_id && !a.settled_at && !(a.event_ids ?? []).length,
+          )
+        : undefined;
       const decide = (code: AuthorizationCode, reason: string) => {
         if (rec) {
           const entry: AuthorizationRecord = {
@@ -1463,7 +1489,9 @@ export class Governance {
             approved: code === "approved",
             reason,
             ...(code === "approved" ? { hold_status: "held" as const } : {}),
+            ...(code === "approved" && replaces ? { reauthorization: true } : {}),
           };
+          if (code === "approved" && replaces) replaces.superseded_at = now.toISOString();
           (rec.authorizations ??= []).push(entry);
         }
         return { approved: code === "approved", code, reason, intent_id: rec?.intent_id };
@@ -1478,6 +1506,8 @@ export class Governance {
         return decide("card_expired", `Single-use card expired at ${card.expires_at}.`);
       }
       const approvedBefore = (rec.authorizations ?? []).filter((a) => a.approved);
+      // What counts against the card: every approved hold except the one this request would replace.
+      const counted = approvedBefore.filter((a) => a !== replaces);
       // All in whole minor units of the card's currency. The tolerance is applied in basis points and rounded down,
       // so a 10% tolerance on 15.00 allows exactly 16.50 and never a fraction of a cent more.
       const cur = card.currency;
@@ -1488,16 +1518,16 @@ export class Governance {
       const amount = toMinor(req.amount, cur);
       if (card.single_use) {
         // A hold the merchant released (a hotel or gas station re-authorizing, say) doesn't use the card up.
-        if (approvedBefore.some((a) => usedMinor(a, cur) > 0)) return decide("already_used", "Single-use card was already charged once.");
+        if (counted.some((a) => usedMinor(a, cur, now) > 0)) return decide("already_used", "Single-use card was already charged once.");
         if (amount > cap) {
           return decide("over_amount", `${fmt(amount)} is over the approved ${fmt(limit)} ${cur}.`);
         }
       } else {
         const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
         // Captured amounts plus holds still open. A released hold gives its room back; a smaller capture frees the rest.
-        const spentThisMonth = approvedBefore
+        const spentThisMonth = counted
           .filter((a) => new Date(a.ts) >= monthStart)
-          .reduce((sum, a) => sum + usedMinor(a, cur), 0);
+          .reduce((sum, a) => sum + usedMinor(a, cur, now), 0);
         if (spentThisMonth + amount > cap) {
           return decide(
             "over_amount",
@@ -1540,7 +1570,8 @@ export class Governance {
 
   /**
    * Apply what the issuer reports about a hold PurseString approved. A capture records what the merchant actually
-   * took and ends the hold, so a capture smaller than the hold frees the difference. A release (reversal, void,
+   * took. A capture smaller than the hold keeps the rest held for a later split-shipment capture, until a release, a
+   * final capture or jit.partial_capture_hold_days end it. A release (reversal, void,
    * expiry) frees part or all of the hold, and a single-use card whose only hold was released can be authorized again.
    * Safe to call with the same event twice: the second call is a no-op.
    */
@@ -1559,7 +1590,7 @@ export class Governance {
       let auth: AuthorizationRecord | undefined;
       if (input.transaction_id) {
         for (const r of Object.values(intents)) {
-          auth = r.authorizations?.find((a) => a.approved && a.transaction_id === input.transaction_id);
+          auth = r.authorizations?.find((a) => a.approved && !a.superseded_at && a.transaction_id === input.transaction_id);
           if (auth) {
             rec = r;
             break;
@@ -1571,7 +1602,7 @@ export class Governance {
         // card, but only when exactly one approved hold on it is still open, so an event can't land on the wrong charge.
         const r = Object.values(intents).find((x) => x.card?.token === input.card_token);
         const open = (r?.authorizations ?? []).filter(
-          (a) => a.approved && !a.transaction_id && openHoldMinor(a, recordCurrency(r!)) > 0,
+          (a) => a.approved && !a.transaction_id && openHoldMinor(a, recordCurrency(r!), now) > 0,
         );
         if (r && open.length === 1) {
           rec = r;
@@ -1585,10 +1616,10 @@ export class Governance {
       const fmt = (minor: number) => `${formatMinor(minor, cur)} ${cur}`;
       const totals = (): Omit<SettlementResult, "outcome" | "message"> => ({
         intent_id: rec!.intent_id,
-        hold_status: holdStatus(auth!, cur),
+        hold_status: holdStatus(auth!, cur, now),
         captured: toMajor(toMinor(auth!.captured ?? 0, cur), cur),
         released: toMajor(toMinor(auth!.released ?? 0, cur), cur),
-        still_held: toMajor(openHoldMinor(auth!, cur), cur),
+        still_held: toMajor(openHoldMinor(auth!, cur, now), cur),
       });
       if ((auth.event_ids ?? []).includes(input.event_id)) {
         return { outcome: "duplicate", message: `Event ${input.event_id} was already applied on ${rec.intent_id}.`, ...totals() };
@@ -1597,20 +1628,31 @@ export class Governance {
       let message: string;
       if (input.kind === "capture") {
         const amountMinor = toMinor(input.amount!, cur);
-        const heldMinor = openHoldMinor(auth, cur);
+        const heldMinor = openHoldMinor(auth, cur, now);
+        const holdDays = this.config.policy.jit.partial_capture_hold_days;
+        const firstCapture = !auth.settled_at;
         auth.captured = toMajor(toMinor(auth.captured ?? 0, cur) + amountMinor, cur);
         auth.settled_at ??= now.toISOString();
+        if (input.final || holdDays === 0) auth.hold_closed_at ??= now.toISOString();
+        else if (firstCapture) {
+          // Counted from the first capture, so later partial captures can't keep a hold open forever.
+          auth.leftover_until = new Date(now.getTime() + holdDays * 86_400_000).toISOString();
+        }
+        const leftMinor = openHoldMinor(auth, cur, now);
         message =
-          heldMinor > amountMinor
-            ? `Captured ${fmt(amountMinor)} of a ${fmt(heldMinor)} hold; the other ${fmt(heldMinor - amountMinor)} no longer counts.`
-            : `Captured ${fmt(amountMinor)}.`;
+          heldMinor <= amountMinor
+            ? `Captured ${fmt(amountMinor)}.`
+            : leftMinor > 0
+              ? `Captured ${fmt(amountMinor)} of a ${fmt(heldMinor)} hold; the other ${fmt(leftMinor)} stays held until ` +
+                `${auth.leftover_until} in case the merchant captures the rest (a split shipment).`
+              : `Captured ${fmt(amountMinor)} of a ${fmt(heldMinor)} hold; the other ${fmt(heldMinor - amountMinor)} no longer counts.`;
       } else {
-        const openMinor = openHoldMinor(auth, cur);
+        const openMinor = openHoldMinor(auth, cur, now);
         const amountMinor = input.amount === undefined ? openMinor : Math.min(openMinor, toMinor(input.amount, cur));
         auth.released = toMajor(toMinor(auth.released ?? 0, cur) + amountMinor, cur);
         message = `Released ${fmt(amountMinor)}; ${fmt(openMinor - amountMinor)} still held.`;
       }
-      auth.hold_status = holdStatus(auth, cur);
+      auth.hold_status = holdStatus(auth, cur, now);
       rec.updated_at = now.toISOString();
       return { outcome: input.kind === "capture" ? "captured" : "released", message, ...totals() };
     });
@@ -1623,6 +1665,7 @@ export class Governance {
       amount: input.amount,
       currency: input.currency,
       source: input.source,
+      ...(input.final ? { final: true } : {}),
       hold_status: result.hold_status,
       captured: result.captured,
       released: result.released,
@@ -1678,7 +1721,7 @@ export class Governance {
           },
         };
       }
-      const chargedM = chargedMinor(rec);
+      const chargedM = chargedMinor(rec, now);
       const charged = toMajor(chargedM, currency);
       const beforeM = toMinor(rec.refunded_total ?? 0, currency);
       const before = toMajor(beforeM, currency);

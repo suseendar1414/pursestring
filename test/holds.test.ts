@@ -44,15 +44,15 @@ test("a partly reversed hold still uses up a single-use card", async () => {
   assert.equal(gov.authorize({ card_token: card.token, amount: 5, merchant: "PDFOCR.IO", transaction_id: "tx_2" }).code, "already_used");
 });
 
-test("a capture smaller than the hold counts only what was captured", async () => {
+test("a final capture smaller than the hold counts only what was captured", async () => {
   const { gov, card, spent } = await issued();
   gov.authorize({ card_token: card.token, amount: 15, merchant: "PDFOCR.IO", transaction_id: "tx_1" });
   assert.equal(spent(), 15, "the card's limit is reserved until the charge settles");
-  const r = gov.recordSettlement({ event_id: "ev_clr", kind: "capture", transaction_id: "tx_1", amount: 9.5, source: "lithic" });
+  const r = gov.recordSettlement({ event_id: "ev_clr", kind: "capture", transaction_id: "tx_1", amount: 9.5, final: true, source: "lithic" });
   assert.equal(r.outcome, "captured");
   assert.equal(r.hold_status, "captured");
   assert.equal(r.captured, 9.5);
-  assert.equal(r.still_held, 0, "capture ends the hold");
+  assert.equal(r.still_held, 0, "a final capture ends the hold");
   assert.equal(spent(), 9.5);
   assert.equal(gov.authorize({ card_token: card.token, amount: 5, merchant: "PDFOCR.IO", transaction_id: "tx_2" }).code, "already_used");
 });
@@ -60,7 +60,7 @@ test("a capture smaller than the hold counts only what was captured", async () =
 test("refunds are measured against what was captured, not the hold", async () => {
   const { gov, card, spent } = await issued();
   gov.authorize({ card_token: card.token, amount: 15, merchant: "PDFOCR.IO", transaction_id: "tx_1" });
-  gov.recordSettlement({ event_id: "ev_clr", kind: "capture", transaction_id: "tx_1", amount: 10, source: "lithic" });
+  gov.recordSettlement({ event_id: "ev_clr", kind: "capture", transaction_id: "tx_1", amount: 10, final: true, source: "lithic" });
   const over = await gov.recordRefund({ refund_id: "rf_1", amount: 12, card_token: card.token, source: "lithic" });
   assert.equal(over.outcome, "over_original");
   const ok = await gov.recordRefund({ refund_id: "rf_2", amount: 10, card_token: card.token, source: "lithic" });
@@ -84,11 +84,11 @@ test("on a recurring card a released hold gives its room back under the monthly 
   assert.equal(charge(15, "tx_3"), "approved");
 });
 
-test("on a recurring card a smaller capture frees the rest of the month's cap", async () => {
+test("on a recurring card a smaller final capture frees the rest of the month's cap", async () => {
   const { gov, card } = await issued({ is_recurring: true, amount: 15 });
   const charge = (amount: number, tx: string) => gov.authorize({ card_token: card.token, amount, merchant: "pdfocr", transaction_id: tx }).code;
   assert.equal(charge(15, "tx_1"), "approved");
-  gov.recordSettlement({ event_id: "ev_clr", kind: "capture", transaction_id: "tx_1", amount: 12, source: "lithic" });
+  gov.recordSettlement({ event_id: "ev_clr", kind: "capture", transaction_id: "tx_1", amount: 12, final: true, source: "lithic" });
   assert.equal(charge(3, "tx_2"), "approved");
   assert.equal(charge(1, "tx_3"), "over_amount");
 });
@@ -111,7 +111,7 @@ test("the same event twice is applied once, and unknown holds change nothing", a
 test("without a transaction ID, an event finds the hold by card only when there's exactly one open", async () => {
   const { gov, card, spent } = await issued();
   gov.authorize({ card_token: card.token, amount: 15, merchant: "PDFOCR.IO" });
-  const r = gov.recordSettlement({ event_id: "ev_1", kind: "capture", card_token: card.token, amount: 14, source: "http" });
+  const r = gov.recordSettlement({ event_id: "ev_1", kind: "capture", card_token: card.token, amount: 14, final: true, source: "http" });
   assert.equal(r.outcome, "captured");
   assert.equal(spent(), 14);
 
@@ -191,11 +191,18 @@ test("Lithic end to end: ASA approves, a reversal frees the card, a re-auth clea
       { token: "e3", type: "AUTHORIZATION", amount: 1500, result: "APPROVED" },
       { token: "e4", type: "CLEARING", amount: 1200, result: "APPROVED" },
     ]);
-    assert.equal(spent(), 12);
+    assert.equal(spent(), 15, "the uncaptured 3.00 stays held: a split shipment could still capture it");
+    await tx("tx_3", [
+      { token: "e3", type: "AUTHORIZATION", amount: 1500, result: "APPROVED" },
+      { token: "e4", type: "CLEARING", amount: 1200, result: "APPROVED" },
+      { token: "e5", type: "AUTHORIZATION_EXPIRY", result: "APPROVED" },
+    ]);
+    assert.equal(spent(), 12, "the issuer let the rest of the hold go");
     // Lithic re-sends the whole event list on every update: nothing is applied twice.
     const replay = await tx("tx_3", [
       { token: "e3", type: "AUTHORIZATION", amount: 1500, result: "APPROVED" },
       { token: "e4", type: "CLEARING", amount: 1200, result: "APPROVED" },
+      { token: "e5", type: "AUTHORIZATION_EXPIRY", result: "APPROVED" },
     ]);
     assert.equal((replay.settlements as { outcome: string }[])[0].outcome, "duplicate");
     assert.equal(spent(), 12);

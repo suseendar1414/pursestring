@@ -20,13 +20,14 @@ import type { Halts } from "./killswitch.js";
 import type { IntentRecord, PurchaseIntent } from "./types.js";
 
 /**
- * Deterministic idempotency key: SHA256(agent_id | task_id | vendor | amount).
+ * Deterministic idempotency key: SHA256(agent_id | task_id | vendor | amount), plus | line_item_id when the agent sets
+ * one, so one task can buy the same thing twice on purpose. Intents without a line item keep the keys they always had.
  * Fields are joined with a separator so "a"+"bc" and "ab"+"c" never collide,
  * the vendor is normalized and the amount is written with the currency's own decimals ("15.00" USD, "1500" JPY,
  * "1.234" KWD), so two amounts that differ by one minor unit never share a key.
  */
 export function idempotencyKey(
-  intent: Pick<PurchaseIntent, "agent_id" | "task_id" | "vendor_domain" | "amount"> & { currency?: string },
+  intent: Pick<PurchaseIntent, "agent_id" | "task_id" | "vendor_domain" | "amount"> & { currency?: string; line_item_id?: string },
 ): string {
   const parts = [
     intent.agent_id.trim(),
@@ -34,6 +35,8 @@ export function idempotencyKey(
     normalizeDomain(intent.vendor_domain),
     formatMajor(intent.amount, intent.currency ?? "USD"),
   ];
+  const lineItem = intent.line_item_id?.trim();
+  if (lineItem) parts.push(`line:${lineItem}`);
   return createHash("sha256").update(parts.join("\u001f")).digest("hex");
 }
 
@@ -282,10 +285,18 @@ export class Store {
 
 /**
  * Total an agent has spent since 00:00 UTC: card spend limits issued, or what was captured once a single-use card's
- * charge settles (less what merchants refunded on those cards),
- * payouts sent and PayPal refunds made through governed tools. Summed in whole minor units of `currency`, so a
+ * charge settles (nothing for a single-use card that expired unused, when its rail is JIT-gated) (less what merchants refunded on those cards),
+ * payouts sent and PayPal refunds made through governed tools, plus any of those still in flight. Summed in whole minor units of `currency`, so a
  * hundred 0.10 spends come to exactly 10.00. Returns major units.
  */
+/** An intent whose money is moving right now but isn't recorded yet. */
+function inFlight(r: IntentRecord): boolean {
+  if (r.status === "issuing") return !r.card;
+  if (r.status === "paying") return !r.payment;
+  if (r.status === "executing") return !r.action?.executed_at;
+  return false;
+}
+
 export function spentToday(intents: Record<string, IntentRecord>, agentId: string, now: Date, currency = "USD"): number {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const m = (n: number) => toMinor(n, currency);
@@ -293,11 +304,14 @@ export function spentToday(intents: Record<string, IntentRecord>, agentId: strin
   for (const r of Object.values(intents)) {
     if (r.intent.agent_id !== agentId) continue;
     if (r.card && new Date(r.card.issued_at) >= dayStart) {
-      const cost = m(toMajor(cardCostMinor(r), r.card.currency));
+      const cost = m(toMajor(cardCostMinor(r, now), r.card.currency));
       sum += Math.max(0, cost - m(r.refunded_total ?? 0));
     }
     if (r.payment && new Date(r.payment.sent_at) >= dayStart) sum += m(r.payment.amount);
     if (r.action?.executed_at && !r.action.is_error && new Date(r.action.executed_at) >= dayStart) sum += m(r.intent.amount);
+    // Money in flight: a card being issued, a payout being sent, a tool call running. The rail call happens outside the
+    // lock, so without this two parallel requests could both pass the budget check before either one's spend is recorded.
+    if (inFlight(r) && new Date(r.updated_at) >= dayStart) sum += m(r.intent.amount);
   }
   return toMajor(sum, currency);
 }
