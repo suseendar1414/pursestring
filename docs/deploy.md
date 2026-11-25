@@ -99,7 +99,7 @@ cd pursestring
 cp examples/policies.yaml policies.yaml      # edit the allowlist
 cp .env.example .env                         # set tokens and webhooks
 docker compose up -d
-curl http://localhost:8787/healthz           # {"ok":true,"version":"0.2.0","rail":"mock"}
+curl http://localhost:8787/healthz           # {"ok":true,"version":"0.3.0","rail":"mock"}
 ```
 
 The compose file binds to `127.0.0.1` only. Put a reverse proxy with TLS in front of it before exposing it to other machines.
