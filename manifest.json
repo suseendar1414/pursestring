@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "pursestring",
   "display_name": "PurseString",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Spending guardrails for AI agents: your rules, and a human when needed, checked before money moves.",
   "long_description": "PurseString sits between your AI agent and your money. The agent submits a purchase intent; PurseString checks it against your policies.yaml (vendor allowlist, per-transaction and daily limits, monthly caps for recurring spend) and auto-approves, denies, or asks a human. Only an approved intent gets a single-use virtual card capped to the approved amount, or a PayPal payout to the vendor account in your policy. With no keys it runs on the mock rail, so cards are fake and no money moves. It is not a payment gateway or wallet: it holds no funds and stops payments before money moves.",
   "author": { "name": "suseendar1414", "url": "https://github.com/suseendar1414" },

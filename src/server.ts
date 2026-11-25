@@ -7,7 +7,7 @@ import type { Upstream } from "./paypal-mcp.js";
 import { isGovernedTool } from "./policy.js";
 import { PurchaseIntentSchema, PurchaseIntentShape, type IntentRecord } from "./types.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 const fail = (err: unknown) => ({
